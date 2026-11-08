@@ -42,6 +42,7 @@ const BOUNDARY_B_COLOR := Color(0.9, 0.22, 0.2)
 const LINE_HALF_WIDTH := 0.08
 const LINE_LIFT := 0.02
 const LINE_HEIGHT := 0.55
+const LINE_ALPHA := 0.55
 
 ## 每个方向的明暗系数（经典体素游戏的烘焙面光照）
 const FACE_SHADE := [0.80, 0.80, 1.0, 0.50, 0.66, 0.66]
@@ -99,6 +100,7 @@ func _build_boundaries() -> void:
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		mat.vertex_color_use_as_albedo = true
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		mat.disable_receive_shadows = true
 		var mi := MeshInstance3D.new()
 		mi.mesh = ArrayMesh.new()
@@ -133,7 +135,7 @@ func _rebuild_boundary_line(index: int) -> void:
 		return
 	var bx := _boundary_x(index)
 	var lin := _boundary_color(index).srgb_to_linear()
-	var color := Color(lin.r, lin.g, lin.b, 1.0)
+	var color := Color(lin.r, lin.g, lin.b, LINE_ALPHA)
 	var fx := float(bx)
 	var hw := LINE_HALF_WIDTH
 	var h := LINE_HEIGHT
