@@ -27,6 +27,7 @@ var unit_db: UnitDB
 var units: Array = []          ## [{unit: Flyer, controller: UnitController}]
 var units_root: Node3D
 ## 预设单位 + 玩家代码（现在还没有编辑器，先用默认代码）
+const MAX_UNITS := 20
 const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.FLYER_SOURCE}]
 
 var _highlight: MeshInstance3D
@@ -244,7 +245,13 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	if not (event is InputEventKey) or not event.pressed:
+	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	if event.keycode == KEY_F:
+		_place_unit()
+		return
+	if event.keycode == KEY_G:
+		_remove_last_unit()
 		return
 	var index := -1
 	if event.keycode >= KEY_1 and event.keycode <= KEY_9:
@@ -254,12 +261,45 @@ func _input(event: InputEvent) -> void:
 		_refresh_hud()
 
 
+## 在准星指到的地方（或眼前空地上方）放一台预设单位
+func _place_unit() -> void:
+	if unit_db == null:
+		return
+	if units.size() >= MAX_UNITS:
+		hud.show_message("单位数量上限 %d" % MAX_UNITS)
+		return
+	var def: Dictionary = unit_db.get_def("feifei")
+	if def.is_empty():
+		return
+	var at := Vector3.ZERO
+	var hit := _aim()
+	if not hit.is_empty():
+		at = (Vector3(hit["cell"]) + Vector3(0.5, 0.5, 0.5)) + Vector3(0, 1.2, 0)
+	else:
+		at = rig.camera.global_position + rig.look_direction() * 5.0
+	at.x = clampf(at.x, 1.0, float(world.size_x) - 2.0)
+	at.z = clampf(at.z, 1.0, float(world.size_z) - 2.0)
+	var ground := world.surface_height(floori(at.x), floori(at.z))
+	_spawn_unit(def, Vector3(at.x, float(ground), at.z), DefaultCode.FLYER_SOURCE)
+	hud.show_message("放下飞飞（共 %d 台）" % units.size())
+
+
+func _remove_last_unit() -> void:
+	if units.is_empty():
+		return
+	var entry: Dictionary = units.pop_back()
+	var node: Node3D = entry["unit"]
+	node.queue_free()
+	hud.show_message("收回一台飞飞（剩 %d 台）" % units.size())
+
+
 func _update_unit_hud() -> void:
 	if hud == null or units.is_empty():
 		return
-	var flyer: Flyer = units[0]["unit"]
-	var controller: UnitController = units[0]["controller"]
-	var text := "%s  高度 %.1f 米  电量 %.0f%%" % [flyer.display_name, flyer.global_position.y - float(world.surface_height(floori(flyer.global_position.x), floori(flyer.global_position.z))), flyer.energy_j / flyer.energy_max * 100.0]
+	var entry: Dictionary = units[units.size() - 1]
+	var flyer: Flyer = entry["unit"]
+	var controller: UnitController = entry["controller"]
+	var text := "单位 %d 台 ｜ %s  高度 %.1f 米  电量 %.0f%%" % [units.size(), flyer.display_name, flyer.global_position.y - float(world.surface_height(floori(flyer.global_position.x), floori(flyer.global_position.z))), flyer.energy_j / flyer.energy_max * 100.0]
 	if controller.halted():
 		text += "\n代码出错：%s" % controller.last_error()
 	hud.set_info(text)
