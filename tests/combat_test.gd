@@ -25,7 +25,7 @@ func _check() -> void:
 	var blue: Array = _main.team_units(0)
 	var red: Array = _main.team_units(1)
 	_record("开局有蓝队单位", blue.size() == 1, str(blue.size()))
-	_record("开局有红队单位", red.size() == 3, str(red.size()))
+	_record("开局有红队单位", red.size() == 1, str(red.size()))
 	_record("蓝队单位队伍标记正确", int(blue[0]["team"]) == 0, str(blue[0]["team"]))
 	_record("红队单位队伍标记正确", int(red[0]["team"]) == 1, str(red[0]["team"]))
 
@@ -57,7 +57,7 @@ func _check() -> void:
 	victim.take_damage(victim.hp)
 	_record("血量归零后失去战斗能力", not victim.alive, "还活着")
 	_main._purge_dead()
-	_record("死亡单位被清理", _main.team_units(1).size() == 2, str(_main.team_units(1).size()))
+	_record("死亡单位被清理", _main.team_units(1).size() == 0, str(_main.team_units(1).size()))
 
 	# 红方全灭 → 蓝方胜利
 	for entry in _main.team_units(1):

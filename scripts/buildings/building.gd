@@ -1,4 +1,5 @@
 extends Node3D
+const MatCache = preload("res://scripts/core/mat_cache.gd")
 ## 一栋建筑：一个占方格的方块体，带队伍颜色和碰撞体。
 ## 具体行为（采矿 / 产单位）由 main 每帧按 kind 驱动。
 
@@ -38,11 +39,7 @@ func _build_visual() -> void:
 	var box := BoxMesh.new()
 	box.size = body_size
 	body.mesh = box
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = base_color
-	mat.metallic = 0.15
-	mat.roughness = 0.6
-	body.material_override = mat
+	body.material_override = MatCache.solid("building_body_%s" % str(def.get("id", "")), base_color)
 	body.position = Vector3(0.0, float(size.y) * 0.5, 0.0)
 	add_child(body)
 
@@ -51,12 +48,7 @@ func _build_visual() -> void:
 	var cap_box := BoxMesh.new()
 	cap_box.size = Vector3(body_size.x * 1.02, 0.14, body_size.z * 1.02)
 	cap.mesh = cap_box
-	var cap_mat := StandardMaterial3D.new()
-	cap_mat.albedo_color = base_color.lightened(0.35)
-	cap_mat.emission_enabled = true
-	cap_mat.emission = base_color.lightened(0.25)
-	cap_mat.emission_energy_multiplier = 0.35
-	cap.material_override = cap_mat
+	cap.material_override = MatCache.of(base_color.lightened(0.35), false, 0.35)
 	cap.position = Vector3(0.0, float(size.y) * 0.94, 0.0)
 	add_child(cap)
 
@@ -66,9 +58,7 @@ func _build_visual() -> void:
 		var mast_box := BoxMesh.new()
 		mast_box.size = Vector3(0.12, 1.1, 0.12)
 		mast.mesh = mast_box
-		var mast_mat := StandardMaterial3D.new()
-		mast_mat.albedo_color = Color(0.25, 0.25, 0.28)
-		mast.material_override = mast_mat
+		mast.material_override = MatCache.solid("building_mast", Color(0.25, 0.25, 0.28))
 		mast.position = Vector3(0.0, float(size.y) + 0.5, 0.0)
 		add_child(mast)
 

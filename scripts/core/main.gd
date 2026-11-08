@@ -17,6 +17,7 @@ const Building = preload("res://scripts/buildings/building.gd")
 const TerrainGen = preload("res://scripts/world/terrain_gen.gd")
 const MpManager = preload("res://scripts/net/mp_manager.gd")
 const MpPanel = preload("res://scripts/ui/mp_panel.gd")
+const MatCache = preload("res://scripts/core/mat_cache.gd")
 
 const WORLD_SIZE_X := 256
 const WORLD_SIZE_Z := 256
@@ -38,6 +39,7 @@ var mp: MpManager
 var mp_panel: MpPanel
 ## 客户端编辑过的单位代码缓存：uid -> {code, revision}
 var _client_codes: Dictionary = {}
+var _world_ready_shown := false
 var economy: Economy
 var production: Production
 var building_db: BuildingDB
@@ -53,8 +55,8 @@ const STARTING_RESOURCES := {"copper": 120, "coal": 60}
 ## 队伍
 const TEAM_BLUE := 0
 const TEAM_RED := 1
-## 红方脚本单位（M5 先放 3 台当对手）
-const RED_START := [{"x": 226.0, "z": 108.0}, {"x": 232.0, "z": 128.0}, {"x": 226.0, "z": 150.0}]
+## 红方脚本单位：开局 1 台，跟蓝方 1 台对打
+const RED_START := [{"x": 222.0, "z": 128.0}]
 ## 激光钻头打单位：每秒伤害 / 有效距离
 ## 鼠标射线能够多远
 const AIM_RANGE := 40.0
@@ -69,7 +71,7 @@ var units_root: Node3D
 var buildings_root: Node3D
 ## 预设单位 + 玩家代码（现在还没有编辑器，先用默认代码）
 const MAX_UNITS := 20
-const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.FLYER_SOURCE}]
+const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.FIGHTER_SOURCE}]
 
 ## 玩家标记的施工/挖掘指令（虚影）：{x, y, z, action, id}
 ## action：mine 挖一格 / place 放方块 / build 造建筑 / remove 拆建筑
@@ -127,7 +129,8 @@ func _ready() -> void:
 	var h := world.surface_height(int(spawn.x), int(spawn.z))
 	rig.position = Vector3(spawn.x, float(h) + 16.0, spawn.z)
 	rig.yaw = -1.5708
-	world.prefetch(rig.position, 20)
+	# 不在这里同步建完 256 个区块（会冻住 4 秒多），改成每帧按预算建，配一个进度提示
+	world.update_streaming(rig.position)
 
 	economy = Economy.new()
 	economy.setup(db, STARTING_RESOURCES)
@@ -293,7 +296,7 @@ func _setup_units() -> void:
 		var red_def: Dictionary = unit_db.get_def("feifei")
 		if red_def.is_empty():
 			break
-		_spawn_unit(red_def, Vector3(float(spec["x"]), 0.0, float(spec["z"])), DefaultCode.RED_SOURCE, TEAM_RED)
+		_spawn_unit(red_def, Vector3(float(spec["x"]), 0.0, float(spec["z"])), DefaultCode.FIGHTER_SOURCE, TEAM_RED)
 
 
 func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BLUE) -> void:
@@ -759,12 +762,7 @@ func _refresh_order_ghosts() -> void:
 		var mesh := BoxMesh.new()
 		mesh.size = size
 		ghost.mesh = mesh
-		var mat := StandardMaterial3D.new()
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		mat.albedo_color = Color(color.r, color.g, color.b, 0.4)
-		ghost.material_override = mat
+		ghost.material_override = MatCache.of(color, true, 0.0, true, 0.4)
 		var half := size * 0.5
 		ghost.position = Vector3(float(o["x"]), float(o["y"]), float(o["z"])) + half + Vector3(0, 0, 0)
 		if action == ORDER_BUILD:
@@ -777,12 +775,7 @@ func _refresh_order_ghosts() -> void:
 		var frame_mesh := BoxMesh.new()
 		frame_mesh.size = size * 1.06
 		frame.mesh = frame_mesh
-		var frame_mat := StandardMaterial3D.new()
-		frame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		frame_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		frame_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		frame_mat.albedo_color = Color(color.r, color.g, color.b, 0.85)
-		frame.material_override = frame_mat
+		frame.material_override = MatCache.of(color, true, 0.0, true, 0.85)
 		frame.position = ghost.position
 		orders_root.add_child(frame)
 		_ghost_nodes.append(frame)
@@ -1078,9 +1071,26 @@ func _process(_delta: float) -> void:
 	_update_debug_hud()
 	_sync_wheel_state()
 	world.update_streaming(rig.position)
+	_update_loading_hint()
 	_update_highlight()
 	_update_unit_hud()
 	_update_code_panel()
+
+
+## 载入进度：区块没建完时在屏幕中间显示百分比
+func _update_loading_hint() -> void:
+	if hud == null or world == null:
+		return
+	var total := world.chunk_count_x() * world.chunk_count_z()
+	if world.chunks.size() >= total and world.pending.is_empty():
+		if _world_ready_shown:
+			_world_ready_shown = false
+		hud.set_loading("")
+		return
+	var built := mini(world.chunks.size(), total)
+	var percent := int(float(built) / float(total) * 100.0)
+	hud.set_loading("正在生成世界  %d%%" % percent)
+	_world_ready_shown = true
 
 
 func _update_highlight() -> void:

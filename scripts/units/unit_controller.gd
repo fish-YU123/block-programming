@@ -19,6 +19,9 @@ var enemies: Array = []
 var orders: Array = []
 
 var _vm: PyVM
+## 一"段"代码执行期间的列表类传感器快照（敌方/标记/雷达），
+## 避免 60 行/秒的慢速执行里出现"上一行还在、下一行就空了"的竞态。
+var _list_snapshot: Dictionary = {}
 var _budget := 0.0
 var _started := false
 var _halted := false
@@ -35,6 +38,7 @@ func bind(unit_node: Node3D, code: String, code_revision: int) -> void:
 	logs = []
 	_vm = PyVM.new()
 	_wire_path_provider()
+	_list_snapshot = {}
 	_vm.load_source(source)
 	if _vm.finished and _vm.error != "":
 		_halted = true
@@ -67,7 +71,7 @@ func tick(delta: float) -> void:
 		_apply_idle_controls()
 		unit.runtime_error = _last_error
 		return
-	_inject_sensors()
+	_inject_sensors(false)
 	_budget += delta * LINES_PER_SECOND
 	var steps := mini(int(_budget), MAX_STEPS_PER_FRAME)
 	for i in steps:
@@ -129,6 +133,8 @@ func tick(delta: float) -> void:
 func _advance() -> void:
 	if _vm.error != "":
 		return
+	# 每到一段代码的边界刷新一次列表快照，段内保持不变
+	_inject_sensors(true)
 	if not _started and _vm.has_function("start"):
 		_started = true
 		if _vm.call_function("start"):
@@ -155,9 +161,18 @@ func _wire_path_provider() -> void:
 		return unit.find_path_to(target)
 
 
-func _inject_sensors() -> void:
+func _inject_sensors(refresh_lists: bool) -> void:
 	var s: Dictionary = unit.sense()
 	var radar: Dictionary = unit.radar()
+	if refresh_lists or _list_snapshot.is_empty():
+		_list_snapshot = {
+			"blocks": radar["blocks"],
+			"heights": radar["heights"],
+			"blocks3": radar.get("blocks3", []),
+			"here": unit.block_here(),
+			"enemies": enemies.duplicate(true),
+			"orders": orders.duplicate(true),
+		}
 	_vm.inject({
 		"pos": s["pos"],
 		"vel": s["vel"],
@@ -167,11 +182,11 @@ func _inject_sensors() -> void:
 		"energy_ratio": s["energy_ratio"],
 		"thrust": s["thrust"],
 		"drill_hits": s["drill_hits"],
-		"blocks": radar["blocks"],
-		"heights": radar["heights"],
-		"blocks3": radar.get("blocks3", []),
-		"here": unit.block_here(),
-		"enemies": enemies,
-		"orders": orders,
+		"blocks": _list_snapshot["blocks"],
+		"heights": _list_snapshot["heights"],
+		"blocks3": _list_snapshot["blocks3"],
+		"here": _list_snapshot["here"],
+		"enemies": _list_snapshot["enemies"],
+		"orders": _list_snapshot["orders"],
 		"moving": unit.moving,
 	})

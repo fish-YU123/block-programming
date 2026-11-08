@@ -10,6 +10,7 @@ var message_label: Label
 var debug_label: Label
 var resources_label: Label
 var overlay_label: Label
+var loading_label: Label
 var _message_timer := 0.0
 
 
@@ -54,6 +55,19 @@ func _ready() -> void:
 	hint_label.text = "WASD 移动 / 空格上升 / Shift 下降 / ⌘ 加速 / 滚轮调视野\n按住左键拖动转视角 / 单击左键标记挖掘 / 右键标记放置\n数字键 1-8 选方块 / Q 切换建筑 / B 标记建造 / N 标记拆除\nF 放置飞飞 / G 收回 / C 代码面板（标记只是虚影，由单位代码执行）"
 	add_child(hint_label)
 
+	loading_label = Label.new()
+	loading_label.set_anchors_preset(Control.PRESET_CENTER)
+	loading_label.position = Vector2(-360, -20)
+	loading_label.size = Vector2(720, 40)
+	loading_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	loading_label.add_theme_font_size_override("font_size", 22)
+	loading_label.add_theme_color_override("font_color", Color(0.85, 0.93, 1.0))
+	loading_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	loading_label.add_theme_constant_override("shadow_offset_x", 2)
+	loading_label.add_theme_constant_override("shadow_offset_y", 2)
+	loading_label.text = ""
+	add_child(loading_label)
+
 	overlay_label = Label.new()
 	overlay_label.set_anchors_preset(Control.PRESET_CENTER)
 	overlay_label.position = Vector2(-300, -60)
@@ -91,6 +105,12 @@ func _process(delta: float) -> void:
 
 func set_info(text: String) -> void:
 	info_label.text = text
+
+
+## 载入进度提示（空字符串表示隐藏）
+func set_loading(text: String) -> void:
+	if loading_label != null:
+		loading_label.text = text
 
 
 func show_overlay(text: String) -> void:

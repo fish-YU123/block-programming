@@ -4,6 +4,7 @@ extends RigidBody3D
 ## 前置激光钻头可挖方块、机背炮管可远程射击、顶部小雷达扫描周围 5×5×5 的方块与 10 米内单位。
 
 const BlockDB = preload("res://scripts/world/block_db.gd")
+const MatCache = preload("res://scripts/core/mat_cache.gd")
 
 ## 炮管开火（主场景据此结算命中与伤害）
 signal gun_fired(unit, from: Vector3, direction: Vector3)
@@ -170,6 +171,9 @@ func _autopilot() -> void:
 	if path.is_empty():
 		if global_position.distance_to(_goal) < 1.5:
 			moving = false
+		else:
+			# 水平到了但高度还差：继续用升力贴住目标高度
+			controls["lift"] = _lift_for(_goal.y)
 		return
 	moving = true
 	var wp: Vector3 = path[0]
@@ -186,12 +190,15 @@ func _autopilot() -> void:
 
 
 ## 把"想达到的水平速度"换算成倾角（每物理帧调用，所以没有代码刷新延迟）
+const MAX_ACCEL := 12.0  ## 水平机动时允许的最大加速度（m/s²），决定"跟手"程度
+
 func _steer_toward(v_des: Vector3) -> void:
 	var dv := v_des - Vector3(linear_velocity.x, 0.0, linear_velocity.z)
-	var acc := dv.limit_length(1.0)
+	var acc := dv.limit_length(MAX_ACCEL)
 	var local := global_transform.basis.inverse() * acc
-	controls["roll"] = clampf(asin(clampf(local.x, -1.0, 1.0)) / gimbal_rad, -1.0, 1.0)
-	controls["pitch"] = clampf(asin(clampf(-local.z, -1.0, 1.0)) / gimbal_rad, -1.0, 1.0)
+	# 加速度按 MAX_ACCEL 归一化后直接映射到喷口偏转（0~1）
+	controls["roll"] = clampf(local.x / MAX_ACCEL, -1.0, 1.0)
+	controls["pitch"] = clampf(-local.z / MAX_ACCEL, -1.0, 1.0)
 
 
 ## 高度保持用的升力
@@ -473,17 +480,9 @@ func block_here() -> String:
 func _build_visual() -> void:
 	# 所有尺寸以 0.75 米立方体为单位，k 按实际 unit_size 缩放
 	var k := unit_size / 0.75
-	var body_mat := StandardMaterial3D.new()
-	body_mat.albedo_color = Color(0.25, 0.28, 0.34)
-	body_mat.metallic = 0.4
-	body_mat.roughness = 0.55
-	var trim_mat := StandardMaterial3D.new()
-	trim_mat.albedo_color = Color(0.92, 0.55, 0.15)
-	trim_mat.roughness = 0.5
-	var glass_mat := StandardMaterial3D.new()
-	glass_mat.albedo_color = Color(0.3, 0.75, 0.9)
-	glass_mat.emission_enabled = true
-	glass_mat.emission = Color(0.2, 0.6, 0.8)
+	var body_mat: StandardMaterial3D = MatCache.solid("flyer_body", Color(0.25, 0.28, 0.34))
+	var trim_mat: StandardMaterial3D = MatCache.solid("flyer_trim", Color(0.92, 0.55, 0.15))
+	var glass_mat: StandardMaterial3D = MatCache.solid("flyer_glass", Color(0.3, 0.75, 0.9), false, 1.0)
 
 	var model := Node3D.new()
 	model.name = "Model"
@@ -582,10 +581,7 @@ func _build_visual() -> void:
 	model.add_child(radar)
 
 	# 机背炮管（沿 -Z 伸出），带一小段炮尾
-	var gun_mat := StandardMaterial3D.new()
-	gun_mat.albedo_color = Color(0.16, 0.17, 0.2)
-	gun_mat.metallic = 0.7
-	gun_mat.roughness = 0.35
+	var gun_mat: StandardMaterial3D = MatCache.solid("flyer_gun", Color(0.16, 0.17, 0.2))
 	var barrel := MeshInstance3D.new()
 	var barrel_mesh := CylinderMesh.new()
 	barrel_mesh.top_radius = 0.028
@@ -608,13 +604,7 @@ func _build_visual() -> void:
 	model.add_child(muzzle)
 
 	# 激光/曳光弹：直接挂在机体上（不随 model 缩放），运行时动态调整位置与长度
-	var beam_mat := StandardMaterial3D.new()
-	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	beam_mat.albedo_color = Color(1.0, 0.35, 0.15)
-	beam_mat.emission_enabled = true
-	beam_mat.emission = Color(1.0, 0.35, 0.1)
-	beam_mat.emission_energy_multiplier = 3.0
-	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var beam_mat: StandardMaterial3D = MatCache.solid("flyer_beam", Color(1.0, 0.35, 0.15), true, 3.0, false, 0.85)
 	_beam = MeshInstance3D.new()
 	var beam_mesh := CylinderMesh.new()
 	beam_mesh.top_radius = 0.035

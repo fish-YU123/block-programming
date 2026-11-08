@@ -91,3 +91,37 @@ def loop():
     else:
         drill(False)
 """
+
+## 对局用的格斗预设：自动找最近敌人，靠近后炮击 / 激光 / 钻头齐上
+const FIGHTER_SOURCE := """# 飞飞格斗预设（两边开局都用它，会自动打起来）
+# 结构：start() 跑一次，loop() 每分钟 60 行预算里反复跑
+def start():
+    print("飞飞出击")
+
+def loop():
+    高度 = heights[2][2] + 8
+    有敌人 = len(enemies) > 0
+    if 有敌人:
+        高度 = enemies[0].y
+        if enemies[0].dist > 4:
+            set_velocity(max(-30, min(30, (enemies[0].x - pos.x) * 1.2)), max(-30, min(30, (enemies[0].z - pos.z) * 1.2)))
+        else:
+            set_velocity(0, 0)
+        if enemies[0].dist <= 15:
+            shoot(enemies[0].x, enemies[0].y, enemies[0].z)
+        if enemies[0].dist <= 5:
+            drill(True)
+            laser(enemies[0].x, enemies[0].y, enemies[0].z)
+        else:
+            drill(False)
+            laser_off()
+    else:
+        drill(False)
+        laser_off()
+        # 没看到敌人（雷达 10 米）就往对面冲，速度给足
+        if pos.x < 128:
+            set_velocity(30, 0)
+        else:
+            set_velocity(-30, 0)
+    set_altitude(高度)
+"""
