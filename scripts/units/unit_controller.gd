@@ -16,6 +16,7 @@ var revision := 0
 var logs: Array = []
 
 var enemies: Array = []
+var orders: Array = []
 
 var _vm: PyVM
 var _budget := 0.0
@@ -40,9 +41,14 @@ func bind(unit_node: Node3D, code: String, code_revision: int) -> void:
 	_apply_idle_controls()
 
 
-## 由主场景每帧更新：视野内敌方单位（[{"x","y","z","team"}]，按距离排序）
+## 由主场景每帧更新：视野内敌方单位（[{"x","y","z","type","hp","dist"}]，按距离排序）
 func set_enemies(list: Array) -> void:
 	enemies = list
+
+
+## 由主场景每帧更新：玩家标记的指令（[{"x","y","z","action","id","dist"}]，按距离排序）
+func set_orders(list: Array) -> void:
+	orders = list
 
 
 func halted() -> bool:
@@ -144,4 +150,5 @@ func _inject_sensors() -> void:
 		"blocks3": radar.get("blocks3", []),
 		"here": unit.block_here(),
 		"enemies": enemies,
+		"orders": orders,
 	})

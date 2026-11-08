@@ -25,6 +25,7 @@ func _initialize() -> void:
 	_test_controls()
 	_test_compare_ops()
 	_test_start_loop()
+	_test_default_source()
 	print("通过 %d 项，失败 %d 项" % [_passed, _failed])
 	for item in _failures:
 		print("  ✗ " + str(item))
@@ -127,6 +128,19 @@ func _test_sensors() -> void:
 func _test_bad_call() -> void:
 	var run := _run("set_drive(\"x\")\n")
 	_expect_contains("参数类型", (run["vm"] as VM).error, "TypeError")
+
+
+func _test_default_source() -> void:
+	# 预设代码必须能在沙箱里编译并跑起来（含 orders/enemies/blocks3 传感器）
+	var DefaultCode = load("res://scripts/units/unit_code_default.gd")
+	var run := _run(DefaultCode.FLYER_SOURCE + "\n", 400, [], {
+		"pos": {"x": 40.0, "y": 30.0, "z": 128.0}, "vel": {"x": 0.0, "y": 0.0, "z": 0.0},
+		"cell": {"x": 40, "y": 30, "z": 128}, "yaw": 0.0, "energy": 1000.0, "energy_ratio": 1.0,
+		"thrust": 0.0, "drill_hits": 0, "blocks": [], "heights": [[26]], "blocks3": [], "here": "grass",
+		"enemies": [], "orders": [],
+	})
+	_expect_no_error("预设飞飞代码能跑", run)
+	_record("预设代码能写控制量", float(run["vm"].state["controls"].get("lift", -1.0)) >= 0.0, str(run["vm"].state["controls"]))
 
 
 func _test_start_loop() -> void:

@@ -74,7 +74,7 @@ func _process(_delta: float) -> bool:
 	if _frames > 2:
 		_controller.tick(0.016)
 		_drill_unit.controls["drill"] = true
-	if _frames == 240:
+	if _frames == 400:
 		_finish()
 	return false
 

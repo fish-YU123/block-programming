@@ -7,6 +7,8 @@ const BlockDB = preload("res://scripts/world/block_db.gd")
 
 ## 炮管开火（主场景据此结算命中与伤害）
 signal gun_fired(unit, from: Vector3, direction: Vector3)
+## 钻头挖掉了一个方块
+signal block_dug(unit, cell: Vector3i, block_id: int)
 
 var world: Node3D
 var unit_id := "feifei"
@@ -110,7 +112,7 @@ func setup(world_node: Node3D, def: Dictionary) -> void:
 	center_of_mass = Vector3(0, -0.1, 0)
 	axis_lock_angular_x = true
 	axis_lock_angular_z = true
-	linear_damp = 0.3
+	linear_damp = 0.12
 	angular_damp = 2.5
 	can_sleep = false
 	continuous_cd = true
@@ -297,8 +299,10 @@ func _drill_once() -> void:
 	var cell: Vector3i = hit["cell"]
 	if world.get_block(cell) == BlockDB.AIR:
 		return
+	var block_id: int = world.get_block(cell)
 	world.set_block(cell, BlockDB.AIR)
 	drill_hits += 1
+	block_dug.emit(self, cell, block_id)
 
 
 # ---------------------------------------------------------------- 传感器

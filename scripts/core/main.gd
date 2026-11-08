@@ -62,6 +62,22 @@ var buildings_root: Node3D
 const MAX_UNITS := 20
 const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.FLYER_SOURCE}]
 
+## 玩家标记的施工/挖掘指令（虚影）：{x, y, z, action, id}
+## action：mine 挖一格 / place 放方块 / build 造建筑 / remove 拆建筑
+var orders: Array = []
+var orders_root: Node3D
+const ORDER_MINE := "mine"
+const ORDER_PLACE := "place"
+const ORDER_BUILD := "build"
+const ORDER_REMOVE := "remove"
+const ORDER_COLOR := {
+	"mine": Color(1.0, 0.35, 0.3),
+	"place": Color(0.45, 0.95, 0.45),
+	"build": Color(0.4, 0.65, 1.0),
+	"remove": Color(1.0, 0.75, 0.2),
+}
+var _ghost_nodes: Array = []
+
 var _highlight: MeshInstance3D
 var _highlight_material: StandardMaterial3D
 var _highlight_array := ArrayMesh.new()
@@ -135,6 +151,10 @@ func _ready() -> void:
 	code_panel.unit_selected.connect(_on_unit_selected)
 	code_panel.panel_closed.connect(_on_panel_closed)
 	code_panel.rerun_pressed.connect(_on_code_rerun)
+	orders_root = Node3D.new()
+	orders_root.name = "Orders"
+	add_child(orders_root)
+
 	_highlight = MeshInstance3D.new()
 	_highlight.name = "BlockHighlight"
 	_highlight_material = StandardMaterial3D.new()
@@ -178,6 +198,7 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 	flyer.rotation.y = -PI * 0.5 if team == TEAM_BLUE else PI * 0.5
 	var controller := UnitController.new()
 	flyer.gun_fired.connect(_on_gun_fired)
+	flyer.block_dug.connect(_on_block_dug)
 	controller.bind(flyer, code, 1)
 	units.append({"uid": _next_uid, "unit": flyer, "controller": controller, "code": code, "revision": 1, "team": team, "cost": economy.unit_cost(def) if economy != null else {}})
 	_next_uid += 1
@@ -297,10 +318,14 @@ func _physics_process(delta: float) -> void:
 	_physics_frames += 1
 	if production != null:
 		production.tick(delta)
+	_prune_orders()
 	_refresh_enemy_sensors()
 	_tick_buildings(delta)
 	for entry in units:
 		var controller: UnitController = entry["controller"]
+		var self_unit: Flyer = entry["unit"]
+		if self_unit.alive:
+			controller.set_orders(orders_for(self_unit.global_position))
 		controller.tick(delta)
 	_process_weapons(delta)
 	_process_combat(delta)
@@ -353,8 +378,20 @@ func _resolve_laser(u: Flyer, delta: float) -> void:
 		u.laser_hits += 1
 	elif not block_hit.is_empty():
 		end = block_hit["point"]
-		_damage_block(block_cell, u.laser_dps_block * delta)
+		_damage_block(block_cell, u.laser_dps_block * delta, int(u.team))
 	u.draw_laser(from, end)
+
+
+## 单位用钻头挖掉方块：蓝方拿到资源
+func _on_block_dug(unit: Flyer, cell: Vector3i, block_id: int) -> void:
+	if economy == null:
+		return
+	if int(unit.team) != TEAM_BLUE:
+		return
+	var drop := economy.mine_block(block_id)
+	if drop != "":
+		hud.show_message("飞飞挖到 %s" % drop)
+	_prune_orders()
 
 
 ## 炮弹命中结算：沿射击方向找第一个碰到的方块/单位
@@ -374,7 +411,7 @@ func _on_gun_fired(u: Flyer, from: Vector3, dir: Vector3) -> void:
 		victim.take_damage(u.gun_damage_unit)
 	elif not block_hit.is_empty():
 		end = block_hit["point"]
-		_damage_block(block_cell, u.gun_damage_block)
+		_damage_block(block_cell, u.gun_damage_block, int(u.team))
 	u.draw_tracer(from, end)
 
 
@@ -403,7 +440,7 @@ func _unit_ray_hit(shooter: Flyer, from: Vector3, dir: Vector3, max_dist: float)
 
 
 ## 对某个方块累计伤害；血量打光就挖掉。返回是否打掉了
-func _damage_block(cell: Vector3i, amount: float) -> bool:
+func _damage_block(cell: Vector3i, amount: float, team: int = -1) -> bool:
 	if world == null or amount <= 0.0:
 		return false
 	var block_id := world.get_block(cell)
@@ -416,6 +453,8 @@ func _damage_block(cell: Vector3i, amount: float) -> bool:
 	if total >= hp:
 		_block_damage.erase(cell)
 		world.set_block(cell, BlockDB.AIR)
+		if team == TEAM_BLUE and economy != null:
+			economy.mine_block(block_id)
 		return true
 	_block_damage[cell] = total
 	return false
@@ -452,6 +491,144 @@ func _refresh_enemy_sensors() -> void:
 		found.sort_custom(func(a, b): return float(a["dist"]) < float(b["dist"]))
 		var controller: UnitController = entry["controller"]
 		controller.set_enemies(found.slice(0, 8))
+
+
+## ---------------- 玩家标记（虚影指令） ----------------
+
+
+## 标记一个格子；已经标过同样的指令就取消它（返回 true 表示这次是"新增"）
+func toggle_order(cell: Vector3i, action: String, id: String = "") -> bool:
+	var index := order_index_at(cell, action)
+	if index >= 0:
+		orders.remove_at(index)
+		_refresh_order_ghosts()
+		return false
+	orders.append({"x": cell.x, "y": cell.y, "z": cell.z, "action": action, "id": id})
+	_refresh_order_ghosts()
+	return true
+
+
+## 取消某个格子上的指令
+func cancel_order(cell: Vector3i, action: String = "") -> bool:
+	var removed := false
+	for i in range(orders.size() - 1, -1, -1):
+		var o: Dictionary = orders[i]
+		if int(o["x"]) != cell.x or int(o["y"]) != cell.y or int(o["z"]) != cell.z:
+			continue
+		if action != "" and str(o["action"]) != action:
+			continue
+		orders.remove_at(i)
+		removed = true
+	if removed:
+		_refresh_order_ghosts()
+	return removed
+
+
+func order_index_at(cell: Vector3i, action: String) -> int:
+	for i in orders.size():
+		var o: Dictionary = orders[i]
+		if int(o["x"]) == cell.x and int(o["y"]) == cell.y and int(o["z"]) == cell.z and str(o["action"]) == action:
+			return i
+	return -1
+
+
+## 某个格子上有没有指令（任意类型）
+func order_at(cell: Vector3i) -> Dictionary:
+	for o in orders:
+		if int(o["x"]) == cell.x and int(o["y"]) == cell.y and int(o["z"]) == cell.z:
+			return o
+	return {}
+
+
+func clear_orders() -> void:
+	orders.clear()
+	_refresh_order_ghosts()
+
+
+## 给单位代码用的指令列表：按距离排序，每项 {x, y, z, action, id, dist}
+func orders_for(pos: Vector3, limit := 8) -> Array:
+	var list: Array = []
+	for o in orders:
+		var p := Vector3(float(o["x"]) + 0.5, float(o["y"]) + 0.5, float(o["z"]) + 0.5)
+		list.append({
+			"x": int(o["x"]),
+			"y": int(o["y"]),
+			"z": int(o["z"]),
+			"action": str(o["action"]),
+			"id": str(o.get("id", "")),
+			"dist": pos.distance_to(p),
+		})
+	list.sort_custom(func(a, b): return float(a["dist"]) < float(b["dist"]))
+	return list.slice(0, limit)
+
+
+## 指令已经不需要了（格子空了 / 已经盖了东西 / 建筑没了）就自动清掉
+func _prune_orders() -> void:
+	var keep: Array = []
+	for o in orders:
+		var cell := Vector3i(int(o["x"]), int(o["y"]), int(o["z"]))
+		match str(o["action"]):
+			ORDER_MINE:
+				if world.get_block(cell) != BlockDB.AIR:
+					keep.append(o)
+			ORDER_PLACE:
+				if world.get_block(cell) == BlockDB.AIR:
+					keep.append(o)
+			ORDER_BUILD:
+				keep.append(o)
+			_:
+				keep.append(o)
+	if keep.size() != orders.size():
+		orders = keep
+		_refresh_order_ghosts()
+
+
+## 重建虚影（半透明方块 + 线框）
+func _refresh_order_ghosts() -> void:
+	if orders_root == null:
+		return
+	for node in _ghost_nodes:
+		if is_instance_valid(node):
+			node.get_parent().remove_child(node)
+			node.queue_free()
+	_ghost_nodes.clear()
+	for o in orders:
+		var action := str(o["action"])
+		var color: Color = ORDER_COLOR.get(action, Color(1, 1, 1))
+		var size := Vector3.ONE * 1.02
+		if action == ORDER_BUILD and building_db != null and building_db.has(str(o.get("id", ""))):
+			size = Vector3(building_db.size_of(str(o["id"]))) * 1.02
+		var ghost := MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		mesh.size = size
+		ghost.mesh = mesh
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mat.albedo_color = Color(color.r, color.g, color.b, 0.4)
+		ghost.material_override = mat
+		var half := size * 0.5
+		ghost.position = Vector3(float(o["x"]), float(o["y"]), float(o["z"])) + half + Vector3(0, 0, 0)
+		if action == ORDER_BUILD:
+			# 建筑虚影从 base 往上长，所以向上偏移一半
+			ghost.position = Vector3(float(o["x"]) + 0.5, float(o["y"]) + size.y * 0.5, float(o["z"]) + 0.5)
+		orders_root.add_child(ghost)
+		_ghost_nodes.append(ghost)
+		# 线框
+		var frame := MeshInstance3D.new()
+		var frame_mesh := BoxMesh.new()
+		frame_mesh.size = size * 1.06
+		frame.mesh = frame_mesh
+		var frame_mat := StandardMaterial3D.new()
+		frame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		frame_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		frame_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		frame_mat.albedo_color = Color(color.r, color.g, color.b, 0.85)
+		frame.material_override = frame_mat
+		frame.position = ghost.position
+		orders_root.add_child(frame)
+		_ghost_nodes.append(frame)
 
 
 ## ---------------- 建筑（M4：挖矿 / 产单位） ----------------
@@ -514,29 +691,48 @@ func _building_placement(at_cell: Vector3i, team: int, size: Vector3i) -> Dictio
 	return {"ok": reason == "", "reason": reason}
 
 
-func _place_building() -> void:
-	if building_db == null or buildings.size() >= MAX_BUILDINGS:
-		hud.show_message("建筑数量上限 %d" % MAX_BUILDINGS)
+## 标记一个建筑虚影（真正施工要等单位的代码去做）
+func _mark_build_order() -> void:
+	if building_db == null:
 		return
 	var def_id := _current_building_id()
 	if def_id == "":
 		return
 	var def: Dictionary = building_db.get_def(def_id)
-	var cost: Dictionary = building_db.cost_of(def_id)
-	if not economy.can_afford(cost):
-		hud.show_message("资源不足：%s" % _cost_text(cost))
-		return
 	var size: Vector3i = building_db.size_of(def_id)
 	var hit := _aim()
 	if hit.is_empty():
-		hud.show_message("准星指着地面再放建筑")
+		hud.show_message("准星指着地面再标建筑")
 		return
 	var base := Vector3i(hit["cell"]) + Vector3i(hit["normal"])
-	var problem := place_building_at(def_id, base, TEAM_BLUE)
-	if problem != "":
-		hud.show_message(problem)
+	var check := _building_placement(base, TEAM_BLUE, size)
+	if not check["ok"]:
+		hud.show_message(str(check["reason"]))
 		return
-	hud.show_message("建好 %s（%s）" % [str(def.get("display_name", def_id)), _cost_text(cost)])
+	if toggle_order(base, ORDER_BUILD, def_id):
+		hud.show_message("标记建造 %s（%s）" % [str(def.get("display_name", def_id)), _cost_text(building_db.cost_of(def_id))])
+	else:
+		hud.show_message("取消标记")
+
+
+## 标记拆除：准星指着的建筑
+func _mark_remove_order() -> void:
+	var hit := _aim()
+	if hit.is_empty():
+		hud.show_message("准星指着要拆的建筑")
+		return
+	var cell := Vector3i(hit["cell"])
+	for entry in buildings:
+		var node = entry["node"]
+		if not is_instance_valid(node):
+			continue
+		if node.occupies(cell):
+			if toggle_order(Vector3i(int(node.base_cell.x), int(node.base_cell.y), int(node.base_cell.z)), ORDER_REMOVE, str(entry["id"])):
+				hud.show_message("标记拆除 %s" % str(entry["id"]))
+			else:
+				hud.show_message("取消标记")
+			return
+	hud.show_message("这里没有建筑")
 
 
 ## 程序化放置（输入处理和测试共用）：成功返回空串，失败返回原因
@@ -783,13 +979,12 @@ func _on_primary_click(at: Vector2) -> void:
 	if hit.is_empty():
 		return
 	var cell: Vector3i = hit["cell"]
-	var block_id := world.get_block(cell)
-	if block_id == BlockDB.AIR:
+	if world.get_block(cell) == BlockDB.AIR:
 		return
-	var drop := economy.mine_block(block_id)
-	world.set_block(cell, BlockDB.AIR)
-	if drop != "":
-		hud.show_message("挖到 %s（+1）" % drop)
+	if toggle_order(cell, ORDER_MINE):
+		hud.show_message("标记挖掘 %d,%d,%d（单位的代码会读到）" % [cell.x, cell.y, cell.z])
+	else:
+		hud.show_message("取消标记")
 	_refresh_hud()
 
 
@@ -851,7 +1046,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		var place_at := Vector3(cell) + Vector3(0.5, 0.5, 0.5)
 		if place_at.distance_to(rig.camera.global_position) < 0.9:
 			return
-		world.set_block(cell, block_options[selected])
+		var block_name := db.name_of(block_options[selected])
+		if toggle_order(cell, ORDER_PLACE, block_name):
+			hud.show_message("标记放置 %s" % block_name)
+		else:
+			hud.show_message("取消标记")
 
 
 func _input(event: InputEvent) -> void:
@@ -875,10 +1074,10 @@ func _input(event: InputEvent) -> void:
 		_cycle_building(-1 if event.shift_pressed else 1)
 		return
 	if event.keycode == KEY_B:
-		_place_building()
+		_mark_build_order()
 		return
 	if event.keycode == KEY_N:
-		_remove_last_building()
+		_mark_remove_order()
 		return
 	var index := -1
 	if event.keycode >= KEY_1 and event.keycode <= KEY_9:
@@ -963,4 +1162,4 @@ func _refresh_hud() -> void:
 	var building_id := _current_building_id()
 	if building_id != "":
 		building_name = str(building_db.get_def(building_id).get("display_name", building_id))
-	hud.set_block_name("手持：%s（%d/%d） ｜ 建筑：%s" % [def.display_name if def != null else "?", selected + 1, block_options.size(), building_name])
+	hud.set_block_name("手持：%s（%d/%d） ｜ 建筑：%s ｜ 标记：%d" % [def.display_name if def != null else "?", selected + 1, block_options.size(), building_name, orders.size()])
