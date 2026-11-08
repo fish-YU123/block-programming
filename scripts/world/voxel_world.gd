@@ -386,7 +386,7 @@ func chunk_count_z() -> int:
 
 
 ## 每帧按距离补建区块
-func update_streaming(focus: Vector3) -> void:
+func update_streaming(focus: Vector3, max_builds := -1, budget_usec := -1) -> void:
 	_focus = focus
 	var fc := Vector2i(floori(focus.x / float(CHUNK)), floori(focus.z / float(CHUNK)))
 	var wanted := {}
@@ -410,8 +410,8 @@ func update_streaming(focus: Vector3) -> void:
 	# 由近到远排队
 	pending.sort_custom(func(a: Vector2i, b: Vector2i):
 		return Vector2(a - fc).length_squared() < Vector2(b - fc).length_squared())
-	var budget := MAX_CHUNK_BUILDS_PER_FRAME
-	var deadline := Time.get_ticks_usec() + BUILD_BUDGET_USEC
+	var budget := MAX_CHUNK_BUILDS_PER_FRAME if max_builds < 0 else max_builds
+	var deadline := Time.get_ticks_usec() + (BUILD_BUDGET_USEC if budget_usec < 0 else budget_usec)
 	while budget > 0 and not pending.is_empty():
 		var c: Vector2i = pending.pop_front()
 		if not chunks.has(c):
@@ -419,6 +419,15 @@ func update_streaming(focus: Vector3) -> void:
 		budget -= 1
 		if Time.get_ticks_usec() >= deadline:
 			break
+
+
+## 还有多少区块等着重建（加载判定用）
+func dirty_count() -> int:
+	var n := 0
+	for chunk in chunks.values():
+		if chunk.dirty:
+			n += 1
+	return n
 
 
 ## 快速预建以 center 为中心、半径 radius 个区块的范围（启动时用）

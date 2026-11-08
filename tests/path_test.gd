@@ -24,6 +24,9 @@ func _initialize() -> void:
 func _process(_delta: float) -> bool:
 	_frames += 1
 	if _frames == 2:
+		_main.world.build_all()
+		_main._start_game()
+	if _frames == 2:
 		_run_grid_tests()
 		# 自动驾驶：单位代码里写 go_to，就该自己飞过去
 		var entry: Dictionary = _main.team_units(0)[0]

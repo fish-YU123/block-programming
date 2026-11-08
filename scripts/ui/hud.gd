@@ -11,6 +11,7 @@ var debug_label: Label
 var resources_label: Label
 var overlay_label: Label
 var loading_label: Label
+var _loading_bg: ColorRect
 var _message_timer := 0.0
 
 
@@ -57,6 +58,13 @@ func _ready() -> void:
 
 	loading_label = Label.new()
 	loading_label.set_anchors_preset(Control.PRESET_CENTER)
+	_loading_bg = ColorRect.new()
+	_loading_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_loading_bg.color = Color(0.02, 0.04, 0.08, 0.78)
+	_loading_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_loading_bg.visible = false
+	add_child(_loading_bg)
+
 	loading_label.position = Vector2(-360, -20)
 	loading_label.size = Vector2(720, 40)
 	loading_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -108,6 +116,17 @@ func set_info(text: String) -> void:
 
 
 ## 载入进度提示（空字符串表示隐藏）
+## 加载阶段：压暗背景、藏掉操作提示，只留进度文字
+func set_loading_mode(on: bool) -> void:
+	if _loading_bg != null:
+		_loading_bg.visible = on
+	for node in [info_label, block_label, hint_label, resources_label, message_label, crosshair]:
+		if node != null:
+			node.visible = not on
+	if loading_label != null and not on:
+		loading_label.text = ""
+
+
 func set_loading(text: String) -> void:
 	if loading_label != null:
 		loading_label.text = text

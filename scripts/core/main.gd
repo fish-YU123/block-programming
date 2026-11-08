@@ -40,6 +40,8 @@ var mp_panel: MpPanel
 ## 客户端编辑过的单位代码缓存：uid -> {code, revision}
 var _client_codes: Dictionary = {}
 var _world_ready_shown := false
+## 地形没建完之前不开始游戏：不生成单位、不响应操作、物理也不跑
+var _world_ready := false
 var economy: Economy
 var production: Production
 var building_db: BuildingDB
@@ -142,7 +144,9 @@ func _ready() -> void:
 	units_root = Node3D.new()
 	units_root.name = "Units"
 	add_child(units_root)
-	_setup_units()
+	_load_unit_db()
+	# 单位等世界建好再生（见 _process 里的 _world_ready 分支），否则会掉进没碰撞的空地形里
+	rig.input_enabled = false
 
 	building_db = BuildingDB.new()
 	var building_problem := building_db.load_dir("res://data/buildings")
@@ -194,6 +198,7 @@ func _ready() -> void:
 	_highlight.material_override = _highlight_material
 	add_child(_highlight)
 	_refresh_hud()
+	hud.set_loading_mode(true)
 
 
 ## ---------------- 联机 ----------------
@@ -280,12 +285,17 @@ func _on_mp_code(uid: int, revision: int, source: String) -> void:
 	controller.bind(entry["unit"], source, revision)
 
 
-func _setup_units() -> void:
+## 单位表在 _ready 里就加载好（组装厂、联机、测试都要用），真正的生成放 _start_game
+func _load_unit_db() -> void:
 	unit_db = UnitDB.new()
 	var problem := unit_db.load_dir("res://data/units")
 	if problem != "":
 		push_error(problem)
-		return
+
+
+func _setup_units() -> void:
+	if unit_db == null:
+		_load_unit_db()
 	for spec in START_UNITS:
 		var def: Dictionary = unit_db.get_def(str(spec["id"]))
 		if def.is_empty():
@@ -1014,7 +1024,7 @@ func _purge_dead() -> void:
 
 
 func _check_victory() -> void:
-	if game_over != "":
+	if game_over != "" or not _world_ready or units.is_empty():
 		return
 	if _physics_frames < 30:
 		return  # 开局 0.5 秒内不判负，等代码跑起来
@@ -1067,6 +1077,15 @@ func _install_environment() -> void:
 func _process(_delta: float) -> void:
 	if world == null or rig == null:
 		return
+	if not _world_ready:
+		# 加载阶段：每帧多建几块，只刷进度条，不响应操作、不跑游戏逻辑
+		world.update_streaming(rig.position, 4, 12000)
+		_update_loading_hint()
+		if hud != null:
+			hud.set_resources(_resources_text())
+		if _loading_finished():
+			_start_game()
+		return
 	_sync_input_state()
 	_update_debug_hud()
 	_sync_wheel_state()
@@ -1075,6 +1094,27 @@ func _process(_delta: float) -> void:
 	_update_highlight()
 	_update_unit_hud()
 	_update_code_panel()
+
+
+## 载入是否完成：视野内该建的区块都建好了
+func _loading_finished() -> bool:
+	if world == null:
+		return true
+	var total := world.chunk_count_x() * world.chunk_count_z()
+	return world.chunks.size() >= total and world.pending.is_empty() and world.dirty_count() == 0
+
+
+## 世界建好后正式开始：生成双方单位、恢复操作、收起进度条
+func _start_game() -> void:
+	if _world_ready:
+		return
+	_world_ready = true
+	rig.input_enabled = true
+	hud.set_loading_mode(false)
+	hud.set_loading("")
+	_world_ready_shown = false
+	_setup_units()
+	hud.show_message("世界已生成，双方各一台飞飞开始对局")
 
 
 ## 载入进度：区块没建完时在屏幕中间显示百分比
@@ -1094,6 +1134,8 @@ func _update_loading_hint() -> void:
 
 
 func _update_highlight() -> void:
+	if _highlight == null:
+		return
 	var hit := _aim()
 	if hit.is_empty():
 		_highlight.visible = false
