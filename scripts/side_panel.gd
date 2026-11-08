@@ -6,7 +6,7 @@ const Deploy = preload("res://scripts/unit_deploy.gd")
 const Deployed = preload("res://scripts/deployed_unit.gd")
 const UnitVM = preload("res://scripts/unit_vm.gd")
 
-const DEFAULT_SOURCE := "# 每个控制中心每秒运行 60 行\n# energy 剩余焦耳，wheels 轮子数量，props 螺旋桨数量\n# 装上 GPS 才有 px py pz\n# 装上线速度传感器才有 vx vy vz 和 ax ay az\n# 装上角度传感器才有 yaw pitch roll（度）和 wx wy wz\n# set_spin(序号, 弧度每秒) 绕两侧锥尖的轴转\n# set_steer(序号, 角度) 转向，0 是装上时的方向\n# set_drive(1) 所有轮子一起转\n# set_thrust(序号, 牛) 沿螺旋桨朝上的方向推，负值反向，最大 5\n# get_link(1).speed = 2    或者 wheel1.speed = 2\n# 轮子 speed 是弧度每秒，steer 是角度；螺旋桨 speed 是推力（牛）\nset_drive(0)\n"
+const DEFAULT_SOURCE := "# 每个控制中心每秒运行 60 行\n# 支持 if/elif/else、while、for i in range(...)、def 函数、列表和字典\n# 不支持 import / class / lambda / try，死循环会被行数预算自动限制\n# energy 剩余焦耳，wheels 轮子数量，props 螺旋桨数量\n# 装上 GPS 才有 px py pz\n# 装上线速度传感器才有 vx vy vz 和 ax ay az\n# 装上角度传感器才有 yaw pitch roll（度）和 wx wy wz\n# set_spin(序号, 弧度每秒) 绕两侧锥尖的轴转\n# set_steer(序号, 角度) 转向，0 是装上时的方向\n# set_drive(1) 所有轮子一起转\n# set_thrust(序号, 牛) 沿螺旋桨朝上的方向推，负值反向，最大 5\n# get_link(1).speed = 2    或者 wheel1.speed = 2\n# 轮子 speed 是弧度每秒，steer 是角度；螺旋桨 speed 是推力（牛）\nset_drive(0)\n"
 
 var _terrain = null
 var _player: Node3D

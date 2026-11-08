@@ -45,6 +45,10 @@ func _physics_process(delta: float) -> void:
 				if load_error != "":
 					unit.runtime_error = load_error
 					continue
+			if program.halted():
+				unit.runtime_error = program.last_error()
+				unit.reapply(delta)
+				continue
 			program.set_links(links)
 			var budget := float(_budgets.get(brain, 0.0)) + delta * LINES_PER_SECOND
 			var steps := mini(int(budget), MAX_STEPS_PER_FRAME)
