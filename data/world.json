@@ -1,0 +1,24 @@
+{
+  "notes": "北是 -Z，南是 +Z，西是 -X，东是 +X。新增方块：在 data/blocks 放一个 json，id 取 0-255 且不要重复，name 用英文。想让矿物成堆出现，加上 generation（type 为 cluster，replaces 填被替换方块的 name），游戏会自动读。颜色可以用 0-255。低于 lava_below_y 起连续 lava_layers 层是岩浆，再往下直到 bedrock_floor_y 是基岩。",
+  "seed": 20261022,
+  "min_y": -560,
+  "max_y": 160,
+  "base_height": 52,
+  "min_surface": 16,
+  "dirt_depth": 3,
+  "surface_block": "grass",
+  "subsurface_block": "dirt",
+  "stone_block": "stone",
+  "lava_block": "lava",
+  "bedrock_block": "bedrock",
+  "lava_below_y": -500,
+  "lava_layers": 25,
+  "bedrock_floor_y": -560,
+  "noise": {
+    "continental": { "frequency": 0.0009, "amplitude": 8, "seed_offset": 11, "octaves": 2 },
+    "hills": { "frequency": 0.0045, "base": 2.5, "extra": 3.5, "seed_offset": 29 },
+    "detail": { "frequency": 0.02, "amplitude": 1.2, "seed_offset": 47 },
+    "ridge": { "frequency": 0.0032, "seed_offset": 83, "start": 0.62, "height": 28 },
+    "bump": { "frequency": 0.018, "seed_offset": 97, "start": 0.72, "height": 5 }
+  }
+}

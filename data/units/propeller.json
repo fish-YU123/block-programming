@@ -1,0 +1,24 @@
+{
+  "id": "propeller",
+  "display_name": "螺旋桨",
+  "order": 8,
+  "size": [0.5, 0.25, 0.5],
+  "mass": 0.01,
+  "energy_j": 0,
+  "power_w": 20,
+  "thrust_n": 5,
+  "friction": 0.3,
+  "color": [196, 202, 210],
+  "wheel": false,
+  "propeller": true,
+  "connections": [
+    {
+      "pos": [0, 0.125, 0],
+      "normal": [0, 1, 0]
+    },
+    {
+      "pos": [0, -0.125, 0],
+      "normal": [0, -1, 0]
+    }
+  ]
+}

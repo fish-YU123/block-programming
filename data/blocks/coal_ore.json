@@ -1,0 +1,28 @@
+{
+  "id": 4,
+  "name": "coal_ore",
+  "display_name": "煤矿石",
+  "solid": true,
+  "opaque": true,
+  "collidable": true,
+  "hardness": 3,
+  "blast_resistance": 3,
+  "light_emission": 0,
+  "draws_boundary": false,
+  "tags": ["ore", "stone"],
+  "color": [48, 48, 52],
+  "generation": {
+    "type": "cluster",
+    "replaces": "stone",
+    "min_y": -490,
+    "max_y": 96,
+    "clusters_per_column": 14,
+    "radius_min": 1,
+    "radius_max": 2,
+    "surface_clusters": 6,
+    "surface_depth_min": 1,
+    "surface_depth_max": 8,
+    "seed_offset": 101,
+    "priority": 1
+  }
+}

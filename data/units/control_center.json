@@ -1,0 +1,22 @@
+{
+  "id": "control_center",
+  "display_name": "控制中心",
+  "order": 4,
+  "size": [0.5, 0.25, 0.5],
+  "mass": 0.05,
+  "energy_j": 0,
+  "power_w": 15,
+  "friction": 0.3,
+  "color": [48, 86, 168],
+  "wheel": false,
+  "connections": [
+    {
+      "pos": [0, 0.125, 0],
+      "normal": [0, 1, 0]
+    },
+    {
+      "pos": [0, -0.125, 0],
+      "normal": [0, -1, 0]
+    }
+  ]
+}

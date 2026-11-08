@@ -1,0 +1,20 @@
+{
+  "id": "wireless_pad",
+  "display_name": "无线充电片",
+  "order": 9,
+  "size": [0.5, 0.25, 0.5],
+  "mass": 0.01,
+  "energy_j": 0,
+  "power_w": 0,
+  "friction": 0.3,
+  "color": [40, 190, 210],
+  "wheel": false,
+  "connections": [
+    {"pos": [0.25, 0, 0], "normal": [1, 0, 0]},
+    {"pos": [-0.25, 0, 0], "normal": [-1, 0, 0]},
+    {"pos": [0, 0.125, 0], "normal": [0, 1, 0]},
+    {"pos": [0, -0.125, 0], "normal": [0, -1, 0]},
+    {"pos": [0, 0, 0.25], "normal": [0, 0, 1]},
+    {"pos": [0, 0, -0.25], "normal": [0, 0, -1]}
+  ]
+}

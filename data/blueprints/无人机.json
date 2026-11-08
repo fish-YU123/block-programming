@@ -1,0 +1,110 @@
+{
+	"kind": "unit_blueprint",
+	"pieces": [
+		{
+			"id": "battery_small",
+			"position": [0, 0, 0],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": -1,
+			"joint_pos": [0, 0, 0],
+			"joint_axis": [0, 1, 0]
+		},
+		{
+			"id": "beam",
+			"position": [0.5, 0, 0],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 0,
+			"joint_pos": [0.25, 0, 0],
+			"joint_axis": [0, 1, 0]
+		},
+		{
+			"id": "propeller",
+			"position": [0.5, 0.375, 0],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 1,
+			"joint_pos": [0.5, 0.25, 0],
+			"joint_axis": [0, 1, 0]
+		},
+		{
+			"id": "beam",
+			"position": [-0.5, 0, 0],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 0,
+			"joint_pos": [-0.25, 0, 0],
+			"joint_axis": [0, 1, 0]
+		},
+		{
+			"id": "propeller",
+			"position": [-0.5, 0.375, 0],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 3,
+			"joint_pos": [-0.5, 0.25, 0],
+			"joint_axis": [0, 1, 0]
+		},
+		{
+			"id": "beam",
+			"position": [0, 0, 0.5],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 0,
+			"joint_pos": [0, 0, 0.25],
+			"joint_axis": [0, 1, 0]
+		},
+		{
+			"id": "propeller",
+			"position": [0, 0.375, 0.5],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 5,
+			"joint_pos": [0, 0.25, 0.5],
+			"joint_axis": [0, 1, 0]
+		},
+		{
+			"id": "beam",
+			"position": [0, 0, -0.5],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 0,
+			"joint_pos": [0, 0, -0.25],
+			"joint_axis": [0, 1, 0]
+		},
+		{
+			"id": "propeller",
+			"position": [0, 0.375, -0.5],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 7,
+			"joint_pos": [0, 0.25, -0.5],
+			"joint_axis": [0, 1, 0]
+		},
+		{
+			"id": "control_center",
+			"position": [0, 0.375, 0],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 0,
+			"joint_pos": [0, 0.25, 0],
+			"joint_axis": [0, 1, 0]
+		},
+		{
+			"id": "angle_sensor",
+			"position": [0, 0.625, 0],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 9,
+			"joint_pos": [0, 0.5, 0],
+			"joint_axis": [0, 1, 0]
+		},
+		{
+			"id": "linear_sensor",
+			"position": [1, 0, 0],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 1,
+			"joint_pos": [0.75, 0, 0],
+			"joint_axis": [1, 0, 0]
+		},
+		{
+			"id": "gps",
+			"position": [-1, 0, 0],
+			"basis": [1, 0, 0, 0, 1, 0, 0, 0, 1],
+			"parent": 3,
+			"joint_pos": [-0.75, 0, 0],
+			"joint_axis": [-1, 0, 0]
+		}
+	],
+	"code": "def fly(x, y, z):\n\tex = x - px\n\tey = y - py\n\tez = z - pz\n\tvx_want = max(-14.0, min(14.0, 0.7 * ex))\n\tvy_want = max(-5.0, min(5.0, 0.5 * ey))\n\tvz_want = max(-14.0, min(14.0, 0.7 * ez))\n\troll_want = max(-12.0, min(12.0, -0.9 * (vx_want - vx)))\n\tpitch_want = max(-12.0, min(12.0, 0.9 * (vz_want - vz)))\n\ttilt = abs(roll) + abs(pitch)\n\tif tilt > 24.0:\n\t\troll_want = 0.0\n\t\tpitch_want = 0.0\n\talt = min(4.4, max(1.5, 2.850 + 0.0012 * (roll * roll + pitch * pitch) + 1.0 * (vy_want - vy)))\n\troll_fix = max(-1.1, min(1.1, 0.064 * roll_want + 0.02 * (roll_want - roll) - 0.55 * wz))\n\tpitch_fix = max(-1.1, min(1.1, -0.064 * pitch_want - 0.02 * (pitch_want - pitch) + 0.55 * wx))\n\tset_thrust(0, alt + roll_fix)\n\tset_thrust(1, alt - roll_fix)\n\tset_thrust(2, alt + pitch_fix)\n\tset_thrust(3, alt - pitch_fix)\nfly(75, 74, -30)\n"
+}

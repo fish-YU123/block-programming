@@ -1,0 +1,14 @@
+{
+  "id": 6,
+  "name": "lava",
+  "display_name": "岩浆",
+  "solid": true,
+  "opaque": false,
+  "collidable": false,
+  "hardness": 100,
+  "blast_resistance": 100,
+  "light_emission": 15,
+  "draws_boundary": true,
+  "tags": ["fluid", "hazard"],
+  "color": [210, 52, 8]
+}

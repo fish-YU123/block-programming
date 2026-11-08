@@ -1,0 +1,14 @@
+{
+  "id": 7,
+  "name": "bedrock",
+  "display_name": "基岩",
+  "solid": true,
+  "opaque": true,
+  "collidable": true,
+  "hardness": -1,
+  "blast_resistance": 3600000,
+  "light_emission": 0,
+  "draws_boundary": false,
+  "tags": ["terrain", "unbreakable"],
+  "color": [42, 42, 48]
+}

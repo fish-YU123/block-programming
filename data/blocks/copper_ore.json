@@ -1,0 +1,28 @@
+{
+  "id": 5,
+  "name": "copper_ore",
+  "display_name": "铜矿石",
+  "solid": true,
+  "opaque": true,
+  "collidable": true,
+  "hardness": 3,
+  "blast_resistance": 3,
+  "light_emission": 0,
+  "draws_boundary": false,
+  "tags": ["ore", "stone"],
+  "color": [196, 118, 64],
+  "generation": {
+    "type": "cluster",
+    "replaces": "stone",
+    "min_y": -400,
+    "max_y": 48,
+    "clusters_per_column": 6,
+    "radius_min": 1,
+    "radius_max": 2,
+    "surface_clusters": 3,
+    "surface_depth_min": 2,
+    "surface_depth_max": 10,
+    "seed_offset": 202,
+    "priority": 2
+  }
+}

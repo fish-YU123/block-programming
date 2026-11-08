@@ -1,0 +1,14 @@
+{
+  "id": 3,
+  "name": "stone",
+  "display_name": "石头",
+  "solid": true,
+  "opaque": true,
+  "collidable": true,
+  "hardness": 1.5,
+  "blast_resistance": 6,
+  "light_emission": 0,
+  "draws_boundary": false,
+  "tags": ["terrain", "stone"],
+  "color": [132, 132, 136]
+}
