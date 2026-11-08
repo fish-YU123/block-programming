@@ -7,14 +7,11 @@ const FLYER_SOURCE := """# 飞飞：自动悬停
 目标高度 = heights[2][2] + 6
 
 while True:
-    # 简单比例控制：按高度误差和垂直速度调升力
+    # 高度：按误差和垂直速度调升力
     误差 = 目标高度 - pos.y
-    set_lift(0.55 + 误差 * 0.06 - vel.y * 0.05)
-    # 慢速向前飞一点，然后停住（演示 RCS）
-    if pos.z > 120:
-        set_rcs(0, 0.35)
-    else:
-        set_rcs(0, -0.35)
-    # 不钻孔
+    set_lift(0.55 + 误差 * 0.08 - vel.y * 0.06)
+    # 位置：用 RCS / 矢量喷口抵消漂移，悬停在原地
+    set_rcs(0, -vel.z * 0.6)
+    set_tilt(0, -vel.x * 0.4)
     drill(False)
 """

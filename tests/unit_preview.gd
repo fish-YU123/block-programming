@@ -17,9 +17,9 @@ func _process(_delta: float) -> bool:
 		var units = _main.get_node("Units")
 		if units.get_child_count() > 0:
 			var u: Node3D = units.get_child(0)
-			rig.position = u.global_position + Vector3(-2.6, 0.9, -2.4)
+			rig.position = u.global_position + Vector3(-2.3, 0.85, -2.1)
 			rig.yaw = -2.35
-			rig.pitch = -0.12
+			rig.pitch = -0.14
 	if _f == 185:
 		root.get_viewport().get_texture().get_image().save_png("res://docs/preview-unit.png")
 		print("SAVED")

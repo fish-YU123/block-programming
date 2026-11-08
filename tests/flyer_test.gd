@@ -35,7 +35,8 @@ func _initialize() -> void:
 	var def: Dictionary = units.get_def("feifei")
 	_record("飞飞存在", not def.is_empty(), "找不到 feifei")
 	_record("飞飞显示名", str(def.get("display_name", "")) == "飞飞", str(def.get("display_name", "")))
-	_record("飞飞质量 40kg", float(def.get("mass", 0.0)) == 40.0, str(def.get("mass", 0)))
+	_record("飞飞质量 12kg", float(def.get("mass", 0.0)) == 12.0, str(def.get("mass", 0)))
+	_record("飞飞尺寸 0.75", float(def.get("size", 0.0)) == 0.75, str(def.get("size", 0)))
 	_record("飞飞雷达半径 2（5×5）", int(def.get("radar_radius", 0)) == 2, str(def.get("radar_radius", 0)))
 
 	_world = VoxelWorld.new()
@@ -53,7 +54,7 @@ func _initialize() -> void:
 	for dx in range(-1, 2):
 		for dy in range(0, 4):
 			_world.set_block(Vector3i(40 + dx, drill_h + 1 + dy, 19), _db.id_of("stone"))
-	_drill_unit = _spawn(Vector3(40.0, float(drill_h) + 2.0, 22.0))
+	_drill_unit = _spawn(Vector3(40.0, float(drill_h) + 2.0, 21.0))
 
 
 func _spawn(at: Vector3) -> Flyer:
@@ -95,10 +96,15 @@ func _finish() -> void:
 	_record("雷达中心高度是地表", int(radar["heights"][2][2]) == _world.surface_y(cx, cz), "%s vs %s" % [str(radar["heights"][2][2]), str(_world.surface_y(cx, cz))])
 	_record("雷达中心方块名有效", str(radar["blocks"][2][2]) != "", str(radar["blocks"][2][2]))
 
-	# 3) 激光钻头
+	# 3) 外形尺寸不超过 0.75 米立方
+	var box := _visual_aabb(_unit)
+	var max_dim: float = maxf(box.size.x, maxf(box.size.y, box.size.z))
+	_record("外形不超过 0.75 米", max_dim <= 0.76, "外接盒 %.2f × %.2f × %.2f" % [box.size.x, box.size.y, box.size.z])
+
+	# 4) 激光钻头
 	_record("钻头挖到方块", _drill_unit.drill_hits > 0, str(_drill_unit.drill_hits))
 
-	# 4) 断电后没有推力
+	# 5) 断电后没有推力
 	_unit.energy_j = 0.0
 	_unit.controls["lift"] = 1.0
 	_unit._physics_process(0.016)
@@ -108,6 +114,24 @@ func _finish() -> void:
 	for item in _failures:
 		print("  ✗ " + item)
 	quit(0 if _failed == 0 else 1)
+
+
+func _visual_aabb(node: Node3D) -> AABB:
+	var result := AABB()
+	var first := true
+	var stack: Array = [node]
+	while not stack.is_empty():
+		var current = stack.pop_back()
+		if current is MeshInstance3D and current.mesh != null:
+			var aabb: AABB = current.global_transform * current.mesh.get_aabb()
+			if first:
+				result = aabb
+				first = false
+			else:
+				result = result.merge(aabb)
+		for child in current.get_children():
+			stack.append(child)
+	return result
 
 
 func _record(name: String, ok: bool, detail: String) -> void:

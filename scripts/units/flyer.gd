@@ -16,6 +16,8 @@ var hover_thrust := 2100.0
 var rcs_thrust := 320.0
 var gimbal_rad := 0.42
 var radar_radius := 2
+## 单位外接立方体边长（米）：0.75×0.75×0.75
+var unit_size := 0.75
 var drill_reach := 3.4
 var drill_cooldown := 0.25
 var drill_power_w := 1200.0
@@ -46,6 +48,7 @@ func setup(world_node: Node3D, def: Dictionary) -> void:
 	rcs_thrust = float(def.get("rcs_thrust_n", 320.0))
 	gimbal_rad = deg_to_rad(float(def.get("gimbal_deg", 24.0)))
 	radar_radius = int(def.get("radar_radius", 2))
+	unit_size = float(def.get("size", 0.75))
 	var drill: Dictionary = def.get("drill", {})
 	drill_reach = float(drill.get("reach", 3.4))
 	drill_cooldown = float(drill.get("cooldown", 0.25))
@@ -123,7 +126,7 @@ func _drill_once() -> void:
 	if world == null:
 		return
 	var basis := global_transform.basis
-	var from := global_position + basis * Vector3(0, 0, -0.6)
+	var from := global_position + basis * Vector3(0, 0, -0.3 * unit_size)
 	var to := from + basis * Vector3(0, 0, -drill_reach)
 	var hit: Dictionary = world.raycast(from, to)
 	if hit.is_empty():
@@ -189,6 +192,8 @@ func block_here() -> String:
 # ---------------------------------------------------------------- 外观
 
 func _build_visual() -> void:
+	# 所有尺寸以 0.75 米立方体为单位，k 按实际 unit_size 缩放
+	var k := unit_size / 0.75
 	var body_mat := StandardMaterial3D.new()
 	body_mat.albedo_color = Color(0.25, 0.28, 0.34)
 	body_mat.metallic = 0.4
@@ -201,102 +206,105 @@ func _build_visual() -> void:
 	glass_mat.emission_enabled = true
 	glass_mat.emission = Color(0.2, 0.6, 0.8)
 
-	# 机身
+	var model := Node3D.new()
+	model.name = "Model"
+	model.scale = Vector3(k, k, k)
+	add_child(model)
+
+	# 机身：扁方的核心舱（0.62 × 0.20 × 0.62）
 	var hull := MeshInstance3D.new()
 	var hull_mesh := BoxMesh.new()
-	hull_mesh.size = Vector3(0.95, 0.28, 1.05)
+	hull_mesh.size = Vector3(0.62, 0.2, 0.62)
 	hull.mesh = hull_mesh
 	hull.material_override = body_mat
-	add_child(hull)
+	model.add_child(hull)
 
-	# 机头
-	var nose := MeshInstance3D.new()
-	var nose_mesh := BoxMesh.new()
-	nose_mesh.size = Vector3(0.55, 0.2, 0.35)
-	nose.mesh = nose_mesh
-	nose.position = Vector3(0, 0, -0.62)
-	nose.material_override = trim_mat
-	add_child(nose)
+	# 背部装甲条（俯视时的识别色）
+	var stripe := MeshInstance3D.new()
+	var stripe_mesh := BoxMesh.new()
+	stripe_mesh.size = Vector3(0.2, 0.02, 0.5)
+	stripe.mesh = stripe_mesh
+	stripe.position = Vector3(0, 0.11, 0)
+	stripe.material_override = trim_mat
+	model.add_child(stripe)
 
-	# 底部矢量喷口
+	# 底部矢量喷口（随机身俯仰/横滚偏转）
 	_nozzle = Node3D.new()
-	_nozzle.position = Vector3(0, -0.16, 0.1)
-	add_child(_nozzle)
+	_nozzle.position = Vector3(0, -0.1, 0)
+	model.add_child(_nozzle)
 	var bell := MeshInstance3D.new()
 	var bell_mesh := CylinderMesh.new()
-	bell_mesh.top_radius = 0.1
-	bell_mesh.bottom_radius = 0.24
-	bell_mesh.height = 0.22
+	bell_mesh.top_radius = 0.05
+	bell_mesh.bottom_radius = 0.11
+	bell_mesh.height = 0.08
 	bell.mesh = bell_mesh
-	bell.position = Vector3(0, -0.11, 0)
+	bell.position = Vector3(0, -0.05, 0)
 	bell.material_override = trim_mat
 	_nozzle.add_child(bell)
 	var flame := MeshInstance3D.new()
 	var flame_mesh := CylinderMesh.new()
-	flame_mesh.top_radius = 0.2
+	flame_mesh.top_radius = 0.1
 	flame_mesh.bottom_radius = 0.02
-	flame_mesh.height = 0.35
+	flame_mesh.height = 0.16
 	flame.mesh = flame_mesh
-	flame.position = Vector3(0, -0.4, 0)
+	flame.position = Vector3(0, -0.17, 0)
 	flame.material_override = glass_mat
 	_nozzle.add_child(flame)
 
-	# 两侧 RCS
+	# 两侧 RCS 吊舱：每个吊舱前后各一个喷口
 	for side in [-1.0, 1.0]:
 		var pod := MeshInstance3D.new()
 		var pod_mesh := BoxMesh.new()
-		pod_mesh.size = Vector3(0.22, 0.2, 0.5)
+		pod_mesh.size = Vector3(0.1, 0.1, 0.26)
 		pod.mesh = pod_mesh
-		pod.position = Vector3(0.55 * side, 0.05, 0.15)
+		pod.position = Vector3(0.32 * side, 0.0, 0.04)
 		pod.material_override = body_mat
-		add_child(pod)
-		for fz in [-0.3, 0.3]:
+		model.add_child(pod)
+		for fz in [-0.14, 0.12]:
 			var jet := MeshInstance3D.new()
 			var jet_mesh := CylinderMesh.new()
-			jet_mesh.top_radius = 0.05
-			jet_mesh.bottom_radius = 0.05
-			jet_mesh.height = 0.16
+			jet_mesh.top_radius = 0.03
+			jet_mesh.bottom_radius = 0.03
+			jet_mesh.height = 0.06
 			jet.mesh = jet_mesh
-			jet.position = Vector3(0.55 * side, 0.05, 0.15 + fz)
+			jet.position = Vector3(0.32 * side, 0.0, 0.04 + fz)
 			jet.rotation.x = PI * 0.5
 			jet.material_override = trim_mat
-			add_child(jet)
+			model.add_child(jet)
 
-	# 前置激光钻头
+	# 机头 + 激光钻头
+	var nose := MeshInstance3D.new()
+	var nose_mesh := BoxMesh.new()
+	nose_mesh.size = Vector3(0.24, 0.14, 0.12)
+	nose.mesh = nose_mesh
+	nose.position = Vector3(0, 0, -0.33)
+	nose.material_override = body_mat
+	model.add_child(nose)
 	var drill := MeshInstance3D.new()
 	var drill_mesh := CylinderMesh.new()
-	drill_mesh.top_radius = 0.13
-	drill_mesh.bottom_radius = 0.02
-	drill_mesh.height = 0.55
+	drill_mesh.top_radius = 0.07
+	drill_mesh.bottom_radius = 0.012
+	drill_mesh.height = 0.2
 	drill.mesh = drill_mesh
-	drill.position = Vector3(0, -0.05, -0.95)
+	drill.position = Vector3(0, 0, -0.31)
 	drill.rotation.x = -PI * 0.5
 	drill.material_override = trim_mat
-	add_child(drill)
+	model.add_child(drill)
 
-	# 顶部小雷达
+	# 顶部小雷达罩
 	var radar := MeshInstance3D.new()
 	var radar_mesh := SphereMesh.new()
-	radar_mesh.radius = 0.16
-	radar_mesh.height = 0.2
+	radar_mesh.radius = 0.08
+	radar_mesh.height = 0.1
 	radar_mesh.is_hemisphere = true
 	radar.mesh = radar_mesh
-	radar.position = Vector3(0, 0.22, 0.75)
+	radar.position = Vector3(0, 0.1, 0.16)
 	radar.material_override = glass_mat
-	add_child(radar)
-	var mast := MeshInstance3D.new()
-	var mast_mesh := CylinderMesh.new()
-	mast_mesh.top_radius = 0.03
-	mast_mesh.bottom_radius = 0.03
-	mast_mesh.height = 0.16
-	mast.mesh = mast_mesh
-	mast.position = Vector3(0, 0.1, 0.75)
-	mast.material_override = body_mat
-	add_child(mast)
+	model.add_child(radar)
 
-	# 碰撞体
+	# 碰撞体（略小于外接立方体，避免卡方块）
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
-	box.size = Vector3(0.9, 0.4, 1.0)
+	box.size = Vector3(0.66, 0.34, 0.6) * k
 	shape.shape = box
 	add_child(shape)
