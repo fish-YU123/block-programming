@@ -1,0 +1,17 @@
+{
+  "id": "rover",
+  "display_name": "车车",
+  "size": 1.2,
+  "mass": 90.0,
+  "energy_j": 200000.0,
+  "hp": 320.0,
+  "cost": {"copper": 45, "iron": 15},
+  "max_speed": 9.0,
+  "drive_force_n": 2600.0,
+  "turn_rate": 2.2,
+  "radar_radius": 2,
+  "drill": {"reach": 2.6, "cooldown": 0.3, "power_w": 900.0},
+  "idle_power_w": 60.0,
+  "drive_power_w": 1600.0,
+  "color": [0.86, 0.72, 0.32]
+}

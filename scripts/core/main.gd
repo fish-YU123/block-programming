@@ -7,6 +7,7 @@ const CameraRig = preload("res://scripts/player/camera_rig.gd")
 const Hud = preload("res://scripts/ui/hud.gd")
 const UnitDB = preload("res://scripts/units/unit_db.gd")
 const Flyer = preload("res://scripts/units/flyer.gd")
+const Rover = preload("res://scripts/units/rover.gd")
 const UnitController = preload("res://scripts/units/unit_controller.gd")
 const DefaultCode = preload("res://scripts/units/unit_code_default.gd")
 const CodePanel = preload("res://scripts/ui/code_panel.gd")
@@ -48,6 +49,8 @@ var building_db: BuildingDB
 ## 已有的建筑：{def_id, node, team, kind, timer}
 var buildings: Array = []
 var selected_building := 0
+## 玩家当前选的预设单位（T 键切换）
+var selected_unit := 0
 const MAX_BUILDINGS := 12
 ## 单位刚体所在的物理层（1 << 1）
 const UNIT_COLLISION_MASK := 2
@@ -207,7 +210,7 @@ func _ready() -> void:
 func _snapshot_units() -> Array:
 	var out: Array = []
 	for entry in units:
-		var u: Flyer = entry["unit"]
+		var u: RigidBody3D = entry["unit"]
 		if not u.alive:
 			continue
 		out.append({
@@ -257,7 +260,7 @@ func _on_mp_joined(team: int) -> void:
 	_client_codes.clear()
 	# 客户端只看主机同步过来的单位，本地模拟的那些先藏起来（它们不再被更新）
 	for entry in units:
-		var local: Flyer = entry["unit"]
+		var local: RigidBody3D = entry["unit"]
 		local.visible = false
 	hud.show_message("已加入房间：你是%s方（C 打开代码面板）" % ("蓝" if team == TEAM_BLUE else "红"))
 
@@ -309,23 +312,30 @@ func _setup_units() -> void:
 		_spawn_unit(red_def, Vector3(float(spec["x"]), 0.0, float(spec["z"])), DefaultCode.FIGHTER_SOURCE, TEAM_RED)
 
 
+## 按单位表里的 id 造对应的节点：车车是地面车，其余默认飞飞
+func _make_unit_node(def: Dictionary) -> RigidBody3D:
+	if str(def.get("id", "")) == "rover":
+		return Rover.new()
+	return Flyer.new()
+
+
 func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BLUE) -> void:
-	var flyer := Flyer.new()
-	flyer.name = "%s_%d" % [str(def.get("id", "unit")), units.size() + 1]
-	units_root.add_child(flyer)
+	var unit := _make_unit_node(def)
+	unit.name = "%s_%d" % [str(def.get("id", "unit")), units.size() + 1]
+	units_root.add_child(unit)
 	var ground := world.surface_height(int(at.x), int(at.z))
-	flyer.global_position = Vector3(at.x, float(ground) + 6.0, at.z)
-	flyer.setup(world, def)
-	flyer.team = team
+	unit.global_position = Vector3(at.x, float(ground) + 6.0, at.z)
+	unit.setup(world, def)
+	unit.team = team
 	# 蓝方面朝 +X、红方面朝 -X
-	flyer.rotation.y = -PI * 0.5 if team == TEAM_BLUE else PI * 0.5
+	unit.rotation.y = -PI * 0.5 if team == TEAM_BLUE else PI * 0.5
 	var controller := UnitController.new()
-	flyer.gun_fired.connect(_on_gun_fired)
-	flyer.block_dug.connect(_on_block_dug)
-	controller.bind(flyer, code, 1)
-	units.append({"uid": _next_uid, "unit": flyer, "controller": controller, "code": code, "revision": 1, "team": team, "cost": economy.unit_cost(def) if economy != null else {}})
+	unit.gun_fired.connect(_on_gun_fired)
+	unit.block_dug.connect(_on_block_dug)
+	controller.bind(unit, code, 1)
+	units.append({"uid": _next_uid, "unit": unit, "controller": controller, "code": code, "revision": 1, "team": team, "cost": economy.unit_cost(def) if economy != null else {}})
 	_next_uid += 1
-	flyer.name = "%s_%d" % [str(def.get("id", "unit")), int(units[units.size() - 1]["uid"])]
+	unit.name = "%s_%d" % [str(def.get("id", "unit")), int(units[units.size() - 1]["uid"])]
 
 
 func _cost_text(cost: Dictionary) -> String:
@@ -385,13 +395,13 @@ func _toggle_code_panel(force_open: bool = false) -> void:
 		for rep in mp.replicas():
 			if int(rep["team"]) != mp.my_team:
 				continue
-			var node: Flyer = rep["node"]
+			var node: RigidBody3D = rep["node"]
 			items.append({"uid": int(rep["uid"]), "label": node.name, "error": ""})
 	else:
 		for entry in units:
 			if int(entry.get("team", TEAM_BLUE)) != TEAM_BLUE:
 				continue
-			var flyer: Flyer = entry["unit"]
+			var flyer: RigidBody3D = entry["unit"]
 			var controller: UnitController = entry["controller"]
 			items.append({
 				"uid": int(entry["uid"]),
@@ -466,7 +476,7 @@ func _update_code_panel() -> void:
 	var entry := _entry_by_uid(uid)
 	if entry.is_empty():
 		return
-	var flyer: Flyer = entry["unit"]
+	var flyer: RigidBody3D = entry["unit"]
 	var controller: UnitController = entry["controller"]
 	var altitude := flyer.global_position.y - float(world.surface_height(floori(flyer.global_position.x), floori(flyer.global_position.z)))
 	code_panel.show_status("%s ｜ 高度 %.1f 米 ｜ 电量 %.0f%% ｜ 代码版本 %d" % [flyer.name, altitude, flyer.energy_j / flyer.energy_max * 100.0, int(entry["revision"])])
@@ -493,7 +503,7 @@ func _physics_process(delta: float) -> void:
 	_tick_buildings(delta)
 	for entry in units:
 		var controller: UnitController = entry["controller"]
-		var self_unit: Flyer = entry["unit"]
+		var self_unit: RigidBody3D = entry["unit"]
 		if self_unit.alive:
 			controller.set_orders(orders_for(self_unit.global_position))
 		controller.tick(delta)
@@ -514,28 +524,28 @@ var _block_damage: Dictionary = {}
 
 func _process_weapons(delta: float) -> void:
 	for entry in units:
-		var u: Flyer = entry["unit"]
+		var u: RigidBody3D = entry["unit"]
 		if not u.alive:
 			continue
 		_resolve_laser(u, delta)
 
 
 ## 激光：朝玩家给的方向打一条 5 格光束，对第一个碰到的方块/单位持续伤害
-func _resolve_laser(u: Flyer, delta: float) -> void:
+func _resolve_laser(u: RigidBody3D, delta: float) -> void:
 	if not u.laser_on:
 		u.clear_laser()
 		return
-	var from := u.muzzle_world()
-	var dir := u.laser_target - from
+	var from: Vector3 = u.muzzle_world()
+	var dir: Vector3 = u.laser_target - from
 	if dir.length() < 0.001:
 		dir = u.forward_dir()
 	dir = dir.normalized()
-	var max_len := u.laser_reach
-	var end := from + dir * max_len
+	var max_len: float = u.laser_reach
+	var end: Vector3 = from + dir * max_len
 	var block_hit: Dictionary = world.raycast(from, end) if world != null else {}
 	var block_t := max_len
 	var block_cell := Vector3i.ZERO
-	var limit := max_len
+	var limit: float = max_len
 	if not block_hit.is_empty():
 		block_t = from.distance_to(block_hit["point"])
 		block_cell = block_hit["cell"]
@@ -543,7 +553,7 @@ func _resolve_laser(u: Flyer, delta: float) -> void:
 	var unit_hit: Dictionary = _unit_ray_hit(u, from, dir, limit)
 	if not unit_hit.is_empty():
 		end = unit_hit["point"]
-		var victim: Flyer = unit_hit["unit"]
+		var victim: RigidBody3D = unit_hit["unit"]
 		victim.take_damage(u.laser_dps_unit * delta)
 		u.laser_hits += 1
 	elif not block_hit.is_empty():
@@ -553,7 +563,7 @@ func _resolve_laser(u: Flyer, delta: float) -> void:
 
 
 ## 单位用钻头挖掉方块：蓝方拿到资源
-func _on_block_dug(unit: Flyer, cell: Vector3i, block_id: int) -> void:
+func _on_block_dug(unit: RigidBody3D, cell: Vector3i, block_id: int) -> void:
 	if economy == null:
 		return
 	if int(unit.team) != TEAM_BLUE:
@@ -565,9 +575,9 @@ func _on_block_dug(unit: Flyer, cell: Vector3i, block_id: int) -> void:
 
 
 ## 炮弹命中结算：沿射击方向找第一个碰到的方块/单位
-func _on_gun_fired(u: Flyer, from: Vector3, dir: Vector3) -> void:
-	var max_len := u.gun_reach
-	var end := from + dir * max_len
+func _on_gun_fired(u: RigidBody3D, from: Vector3, dir: Vector3) -> void:
+	var max_len: float = u.gun_reach
+	var end: Vector3 = from + dir * max_len
 	var block_hit: Dictionary = world.raycast(from, end) if world != null else {}
 	var limit := max_len
 	var block_cell := Vector3i.ZERO
@@ -577,7 +587,7 @@ func _on_gun_fired(u: Flyer, from: Vector3, dir: Vector3) -> void:
 	var unit_hit: Dictionary = _unit_ray_hit(u, from, dir, limit)
 	if not unit_hit.is_empty():
 		end = unit_hit["point"]
-		var victim: Flyer = unit_hit["unit"]
+		var victim: RigidBody3D = unit_hit["unit"]
 		victim.take_damage(u.gun_damage_unit)
 	elif not block_hit.is_empty():
 		end = block_hit["point"]
@@ -586,11 +596,11 @@ func _on_gun_fired(u: Flyer, from: Vector3, dir: Vector3) -> void:
 
 
 ## 射线与敌方单位求交（球体近似），返回最近命中 {unit, point}，没命中返回空字典
-func _unit_ray_hit(shooter: Flyer, from: Vector3, dir: Vector3, max_dist: float) -> Dictionary:
+func _unit_ray_hit(shooter: RigidBody3D, from: Vector3, dir: Vector3, max_dist: float) -> Dictionary:
 	var best_t := max_dist
 	var best: Dictionary = {}
 	for entry in units:
-		var target: Flyer = entry["unit"]
+		var target: RigidBody3D = entry["unit"]
 		if target == shooter or not target.alive or int(target.team) == int(shooter.team):
 			continue
 		var oc := from - target.global_position
@@ -638,13 +648,13 @@ func block_damage_at(cell: Vector3i) -> float:
 ## 把敌方单位的位置塞给每个单位的传感器（10 米内，按距离排序，最近的前 8 个）
 func _refresh_enemy_sensors() -> void:
 	for entry in units:
-		var self_unit: Flyer = entry["unit"]
+		var self_unit: RigidBody3D = entry["unit"]
 		if not self_unit.alive:
 			continue
 		var enemy_team: int = TEAM_BLUE if int(entry.get("team", TEAM_BLUE)) == TEAM_RED else TEAM_RED
 		var found: Array = []
 		for other in team_units(enemy_team):
-			var o: Flyer = other["unit"]
+			var o: RigidBody3D = other["unit"]
 			if not o.alive:
 				continue
 			var dist: float = self_unit.global_position.distance_to(o.global_position)
@@ -1011,7 +1021,7 @@ func _produce_unit(node) -> void:
 func team_units(team: int) -> Array:
 	var out: Array = []
 	for entry in units:
-		var flyer: Flyer = entry["unit"]
+		var flyer: RigidBody3D = entry["unit"]
 		if int(entry.get("team", TEAM_BLUE)) == team and flyer.alive:
 			out.append(entry)
 	return out
@@ -1020,13 +1030,13 @@ func team_units(team: int) -> Array:
 ## 激光钻头打敌方单位：正前方、距离够近、正在钻
 func _process_combat(delta: float) -> void:
 	for attacker_entry in units:
-		var attacker: Flyer = attacker_entry["unit"]
+		var attacker: RigidBody3D = attacker_entry["unit"]
 		if not attacker.alive or not bool(attacker.controls.get("drill", false)):
 			continue
 		if attacker.energy_out:
 			continue
 		for victim_entry in units:
-			var victim: Flyer = victim_entry["unit"]
+			var victim: RigidBody3D = victim_entry["unit"]
 			if victim == attacker or not victim.alive:
 				continue
 			if int(victim_entry.get("team", TEAM_BLUE)) == int(attacker_entry.get("team", TEAM_BLUE)):
@@ -1038,7 +1048,7 @@ func _process_combat(delta: float) -> void:
 func _purge_dead() -> void:
 	var survivors: Array = []
 	for entry in units:
-		var flyer: Flyer = entry["unit"]
+		var flyer: RigidBody3D = entry["unit"]
 		if flyer.alive:
 			survivors.append(entry)
 		else:
@@ -1145,6 +1155,10 @@ func _start_game() -> void:
 ## 载入进度：区块没建完时在屏幕中间显示百分比
 func _update_loading_hint() -> void:
 	if hud == null or world == null:
+		return
+	# 开局以后就不再显示加载进度（改方块引起的 pending 重建不打扰玩家）
+	if _world_ready:
+		hud.set_loading("")
 		return
 	var total := world.chunk_count_x() * world.chunk_count_z()
 	if world.chunks.size() >= total and world.pending.is_empty():
@@ -1261,7 +1275,7 @@ func _on_unit_clicked(entry: Dictionary) -> void:
 		return
 	_last_click_uid = uid
 	_last_click_time = now
-	var flyer: Flyer = entry["unit"]
+	var flyer: RigidBody3D = entry["unit"]
 	hud.show_message("%s：再点一次打开代码" % flyer.display_name)
 
 
@@ -1312,6 +1326,9 @@ func _input(event: InputEvent) -> void:
 	if event.keycode == KEY_G:
 		_remove_last_unit()
 		return
+	if event.keycode == KEY_T:
+		_cycle_unit(-1 if event.shift_pressed else 1)
+		return
 	if event.keycode == KEY_Q:
 		_cycle_building(-1 if event.shift_pressed else 1)
 		return
@@ -1336,7 +1353,7 @@ func _place_unit() -> void:
 	if units.size() >= MAX_UNITS:
 		hud.show_message("单位数量上限 %d" % MAX_UNITS)
 		return
-	var def: Dictionary = unit_db.get_def("feifei")
+	var def: Dictionary = _current_unit_def()
 	if def.is_empty():
 		return
 	var cost: Dictionary = economy.unit_cost(def)
@@ -1353,8 +1370,33 @@ func _place_unit() -> void:
 	at.z = clampf(at.z, 1.0, float(world.size_z) - 2.0)
 	var ground := world.surface_height(floori(at.x), floori(at.z))
 	economy.spend(cost)
-	_spawn_unit(def, Vector3(at.x, float(ground), at.z), DefaultCode.FLYER_SOURCE)
-	hud.show_message("放下飞飞（共 %d 台）" % units.size())
+	var code: String = DefaultCode.ROVER_SOURCE if str(def.get("id", "")) == "rover" else DefaultCode.FLYER_SOURCE
+	_spawn_unit(def, Vector3(at.x, float(ground), at.z), code)
+	hud.show_message("放下%s（共 %d 台）" % [str(def.get("display_name", "单位")), units.size()])
+	_refresh_hud()
+
+
+## 当前选中的预设单位定义
+func _current_unit_def() -> Dictionary:
+	if unit_db == null:
+		return {}
+	var ids: Array = unit_db.order
+	if ids.is_empty():
+		return {}
+	selected_unit = clampi(selected_unit, 0, ids.size() - 1)
+	return unit_db.get_def(str(ids[selected_unit]))
+
+
+## T 切换预设单位（Shift+T 反向）
+func _cycle_unit(step: int) -> void:
+	if unit_db == null:
+		return
+	var ids: Array = unit_db.order
+	if ids.is_empty():
+		return
+	selected_unit = posmod(selected_unit + step, ids.size())
+	var def: Dictionary = _current_unit_def()
+	hud.show_message("当前单位：%s（%d/%d）" % [str(def.get("display_name", "?")), selected_unit + 1, ids.size()])
 	_refresh_hud()
 
 
@@ -1379,7 +1421,7 @@ func _update_unit_hud() -> void:
 		hud.set_resources(_resources_text())
 		return
 	var entry: Dictionary = mine[mine.size() - 1]
-	var flyer: Flyer = entry["unit"]
+	var flyer: RigidBody3D = entry["unit"]
 	var controller: UnitController = entry["controller"]
 	var text := "我方单位 %d 台 ｜ %s  高度 %.1f 米  电量 %.0f%%" % [mine.size(), flyer.display_name, flyer.global_position.y - float(world.surface_height(floori(flyer.global_position.x), floori(flyer.global_position.z))), flyer.energy_j / flyer.energy_max * 100.0]
 	if controller.halted():
@@ -1404,4 +1446,8 @@ func _refresh_hud() -> void:
 	var building_id := _current_building_id()
 	if building_id != "":
 		building_name = str(building_db.get_def(building_id).get("display_name", building_id))
-	hud.set_block_name("手持：%s（%d/%d） ｜ 建筑：%s ｜ 标记：%d" % [def.display_name if def != null else "?", selected + 1, block_options.size(), building_name, orders.size()])
+	var unit_name := "-"
+	var unit_def := _current_unit_def()
+	if not unit_def.is_empty():
+		unit_name = str(unit_def.get("display_name", "?"))
+	hud.set_block_name("手持：%s（%d/%d） ｜ 建筑：%s ｜ 单位：%s ｜ 标记：%d" % [def.display_name if def != null else "?", selected + 1, block_options.size(), building_name, unit_name, orders.size()])
