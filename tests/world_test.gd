@@ -21,7 +21,7 @@ func _initialize() -> void:
 	var db := BlockDB.new()
 	var problem := db.load_dir("res://data/blocks")
 	_record("方块数据可加载", problem == "", problem)
-	_record("方块数量 = 9", db.defs.size() == 9, str(db.defs.size()))
+	_record("方块数量 = 10", db.defs.size() == 10, str(db.defs.size()))
 
 	var world := VoxelWorld.new()
 	root.add_child(world)
@@ -47,6 +47,18 @@ func _initialize() -> void:
 
 	world.set_block(Vector3i(10, h + 3, 10), db.id_of("planks"))
 	_record("放置高处方块", world.get_block(Vector3i(10, h + 3, 10)) == db.id_of("planks"))
+
+	# 中立区与分界
+	var big := VoxelWorld.new()
+	root.add_child(big)
+	big.setup(db, 12345, 256, 256, 64)
+	_record("中立区判定", big.terrain.is_neutral(128) and not big.terrain.is_neutral(99) and not big.terrain.is_neutral(156))
+	_record("中立区高度 16", big.terrain.height_at(128, 77) == 16)
+	_record("中立区表面是中立方块", big.get_block(Vector3i(128, 16, 77)) == db.id_of("neutral"))
+	_record("中立区上方是空气", big.get_block(Vector3i(128, 20, 77)) == BlockDB.AIR)
+	_record("中立区禁止建造", not big.is_buildable(Vector3i(128, 16, 77)))
+	_record("两侧可建造", big.is_buildable(Vector3i(50, 20, 77)) and big.is_buildable(Vector3i(200, 20, 77)))
+	_record("中立区宽 56", 156 - 100 == 56)
 
 	print("通过 %d 项，失败 %d 项" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)
