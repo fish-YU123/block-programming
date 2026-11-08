@@ -100,6 +100,9 @@ func _check() -> void:
 	_main._on_code_applied(uid, "while True:\n    pass\n")
 	_record("每次应用版本号 +1", int(_main.units[0]["revision"]) == rev_before + 1, str(_main.units[0]["revision"]))
 
+	# 面板在右侧，屏幕左上角的鼠标不算"压在面板上"（滚轮应该还能调视野）
+	_record("面板打开时鼠标不在面板上", _main.code_panel.is_open() and not _main.code_panel.mouse_over())
+
 	print("通过 %d 项，失败 %d 项" % [_passed, _failed])
 	for item in _failures:
 		print("  ✗ " + item)

@@ -12,6 +12,7 @@ const MAX_LOG_LINES := 12
 const PANEL_WIDTH := 620.0
 
 var root_control: Control
+var panel_box: PanelContainer
 var editor: CodeEdit
 var unit_list: ItemList
 var status_label: Label
@@ -58,10 +59,11 @@ func current_uid() -> int:
 
 ## 键盘焦点是否在代码框里（在别处点击后就为 false）
 ## 鼠标是不是压在面板上（用来屏蔽滚轮调视野）
+## 鼠标是否压在这个面板（右侧停靠区域）上；root_control 是全屏容器，不能拿来判
 func mouse_over() -> bool:
-	if root_control == null or not visible:
+	if panel_box == null or not visible:
 		return false
-	return root_control.get_global_rect().has_point(get_viewport().get_mouse_position())
+	return panel_box.get_global_rect().has_point(get_viewport().get_mouse_position())
 
 
 func editor_has_focus() -> bool:
@@ -135,6 +137,7 @@ func _build() -> void:
 
 	# 贴在屏幕右侧的面板（世界留在左边，方便边看单位边改代码）
 	var panel := PanelContainer.new()
+	panel_box = panel
 	panel.anchor_left = 1.0
 	panel.anchor_right = 1.0
 	panel.anchor_top = 0.0

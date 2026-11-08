@@ -22,7 +22,7 @@ const DRAG_THRESHOLD := 4.0
 ## 滚轮缩放视野（度）
 const FOV_MIN := 35.0
 const FOV_MAX := 100.0
-const FOV_STEP := 3.0
+const FOV_STEP := 5.0
 
 ## 拖动时把鼠标藏起来（HIDDEN 模式：光标不可见但仍会移动），
 ## 光标快贴到窗口边缘时把它挪回中心，避免转到屏幕边缘就转不动；
