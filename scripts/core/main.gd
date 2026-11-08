@@ -53,7 +53,7 @@ const MAX_BUILDINGS := 12
 const UNIT_COLLISION_MASK := 2
 const DOUBLE_CLICK_MS := 400
 ## 开局资源（还没做采集经济闭环前的启动资金）
-const STARTING_RESOURCES := {"copper": 120, "coal": 60}
+const STARTING_RESOURCES := {"copper": 120, "coal": 60, "iron": 40, "gold": 10}
 ## 队伍
 const TEAM_BLUE := 0
 const TEAM_RED := 1
@@ -943,6 +943,8 @@ func _tick_buildings(delta: float) -> void:
 			_mine_with(node, def)
 		elif kind == "factory":
 			_produce_unit(node)
+		elif kind == "charger":
+			_charge_nearby(node, def, period)
 
 
 func _mine_with(node, def: Dictionary) -> void:
@@ -963,6 +965,29 @@ func _mine_with(node, def: Dictionary) -> void:
 		if drop != "":
 			hud.show_message("采矿机挖到 %s" % drop)
 		return
+
+
+## 充电站：给半径内同队伍的单位补电
+func _charge_nearby(node, def: Dictionary, period: float) -> void:
+	var radius := float(def.get("radius", 14.0))
+	var power := float(def.get("power_w", 900.0))
+	var center: Vector3 = node.center_world()
+	var charged := 0
+	for entry in units:
+		var unit: Node3D = entry["unit"]
+		if not is_instance_valid(unit) or not unit.alive:
+			continue
+		if int(entry["team"]) != int(node.team):
+			continue
+		if unit.global_position.distance_to(center) > radius:
+			continue
+		if unit.energy_j >= unit.energy_max:
+			continue
+		unit.energy_j = minf(unit.energy_max, unit.energy_j + power * period)
+		unit.energy_out = unit.energy_j <= 0.0
+		charged += 1
+	if charged > 0:
+		node.produced += charged
 
 
 func _produce_unit(node) -> void:

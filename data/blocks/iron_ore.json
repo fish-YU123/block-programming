@@ -1,0 +1,10 @@
+{
+  "id": 9,
+  "name": "iron_ore",
+  "display_name": "铁矿",
+  "color": [196, 200, 208],
+  "solid": true,
+  "opaque": true,
+  "hardness": 3.0,
+  "drop": "iron"
+}

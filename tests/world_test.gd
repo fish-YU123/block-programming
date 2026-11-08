@@ -21,7 +21,7 @@ func _initialize() -> void:
 	var db := BlockDB.new()
 	var problem := db.load_dir("res://data/blocks")
 	_record("方块数据可加载", problem == "", problem)
-	_record("方块数量 = 9", db.defs.size() == 9, str(db.defs.size()))
+	_record("方块数量 = 11", db.defs.size() == 11, str(db.defs.size()))
 
 	var world := VoxelWorld.new()
 	root.add_child(world)

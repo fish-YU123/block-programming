@@ -51,7 +51,7 @@ func _process(_delta: float) -> bool:
 	var db = _main.db
 
 	# 1) 建筑数据表
-	_record("建筑表加载 2 种", _main.building_db.order.size() == 2, str(_main.building_db.order))
+	_record("建筑表加载 3 种", _main.building_db.order.size() == 3, str(_main.building_db.order))
 	_record("采矿机尺寸 3×2×3", _main.building_db.size_of("miner") == Vector3i(3, 2, 3))
 	_record("组装厂尺寸 3×3×3", _main.building_db.size_of("factory") == Vector3i(3, 3, 3))
 	_record("采矿机周期 1.2 秒", is_equal_approx(_main.building_db.period_of("miner"), 1.2))
@@ -108,6 +108,20 @@ func _process(_delta: float) -> bool:
 	_main._remove_last_building()
 	_record("拆掉一栋建筑", _main.buildings.size() == count_before - 1)
 	_record("拆除退回资源", economy.amount("copper") > copper_pre2, "%d -> %d" % [copper_pre2, economy.amount("copper")])
+
+	# 充电站：给半径内的己方单位补电
+	var charger_base := _flat_spot(24, 96)
+	if charger_base != Vector3i(-1, -1, -1):
+		var charger_err: String = _main.place_building_at("charger", charger_base, 0)
+		_record("充电站能放置", charger_err == "", charger_err)
+		var unit = _main.team_units(0)[0]["unit"]
+		unit.global_position = _main.buildings[-1]["node"].center_world() + Vector3(3.0, 0.0, 0.0)
+		unit.energy_j = 1000.0
+		_main._tick_buildings(1.0)
+		_record("充电站给单位充电", unit.energy_j > 1000.0, "电量 %.0f" % unit.energy_j)
+		unit.energy_j = unit.energy_max
+		_main._tick_buildings(1.0)
+		_record("充满后不再升", unit.energy_j <= unit.energy_max + 0.1, "电量 %.0f" % unit.energy_j)
 
 	print("通过 %d 项，失败 %d 项" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)

@@ -1,0 +1,11 @@
+{
+  "id": "charger",
+  "display_name": "充电站",
+  "kind": "charger",
+  "size": [2, 3, 2],
+  "cost": {"copper": 30, "iron": 10},
+  "period": 0.5,
+  "radius": 14.0,
+  "power_w": 900.0,
+  "color": [0.34, 0.86, 0.62]
+}

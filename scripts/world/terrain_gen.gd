@@ -25,6 +25,8 @@ var id_stone := 3
 var id_sand := 4
 var id_coal := 5
 var id_copper := 6
+var id_iron := 9
+var id_gold := 10
 var id_bedrock := 7
 
 var _height_cache := {}
@@ -39,6 +41,8 @@ func setup(db: BlockDB, world_seed: int) -> void:
 	id_sand = db.id_of("sand")
 	id_coal = db.id_of("coal_ore")
 	id_copper = db.id_of("copper_ore")
+	id_iron = db.id_of("iron_ore")
+	id_gold = db.id_of("gold_ore")
 	id_bedrock = db.id_of("bedrock")
 	_continent.seed = world_seed
 	_continent.noise_type = FastNoiseLite.TYPE_SIMPLEX
@@ -104,6 +108,11 @@ func block_at_height(x: int, y: int, z: int, h: int) -> int:
 		return id_coal
 	if y <= h - 6 and roll < 0.032:
 		return id_copper
+	# 铁矿更深一些，金矿最深也最少
+	if id_iron != 0 and y <= h - 10 and roll < 0.045:
+		return id_iron
+	if id_gold != 0 and y <= h - 16 and roll < 0.051:
+		return id_gold
 	return id_stone
 
 

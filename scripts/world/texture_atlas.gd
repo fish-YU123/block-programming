@@ -106,6 +106,10 @@ func _paint(cell: int, material: String, base: Color, stone: Color, dirt: Color,
 			_paint_ore(ox, oy, stone, seed, Color(0.07, 0.07, 0.08), Color(0.34, 0.34, 0.36))
 		"copper_ore":
 			_paint_ore(ox, oy, stone, seed, base, Color(0.42, 0.72, 0.52))
+		"iron_ore":
+			_paint_ore(ox, oy, stone, seed, base, Color(0.72, 0.74, 0.78))
+		"gold_ore":
+			_paint_ore(ox, oy, stone, seed, base, Color(1.0, 0.86, 0.42))
 		"bedrock":
 			_paint_bedrock(ox, oy, base, seed)
 		"planks":
