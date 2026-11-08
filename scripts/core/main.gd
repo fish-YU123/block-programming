@@ -5,6 +5,10 @@ const BlockDB = preload("res://scripts/world/block_db.gd")
 const VoxelWorld = preload("res://scripts/world/voxel_world.gd")
 const CameraRig = preload("res://scripts/player/camera_rig.gd")
 const Hud = preload("res://scripts/ui/hud.gd")
+const UnitDB = preload("res://scripts/units/unit_db.gd")
+const Flyer = preload("res://scripts/units/flyer.gd")
+const UnitController = preload("res://scripts/units/unit_controller.gd")
+const DefaultCode = preload("res://scripts/units/unit_code_default.gd")
 
 const WORLD_SIZE_X := 256
 const WORLD_SIZE_Z := 256
@@ -18,6 +22,12 @@ var rig: CameraRig
 var hud: Hud
 var block_options: Array[int] = []
 var selected := 0
+
+var unit_db: UnitDB
+var units: Array = []          ## [{unit: Flyer, controller: UnitController}]
+var units_root: Node3D
+## 预设单位 + 玩家代码（现在还没有编辑器，先用默认代码）
+const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.FLYER_SOURCE}]
 
 var _highlight: MeshInstance3D
 var _highlight_material: StandardMaterial3D
@@ -59,6 +69,11 @@ func _ready() -> void:
 	rig.yaw = -1.5708
 	world.prefetch(rig.position, 20)
 
+	units_root = Node3D.new()
+	units_root.name = "Units"
+	add_child(units_root)
+	_setup_units()
+
 	hud = Hud.new()
 	hud.name = "Hud"
 	add_child(hud)
@@ -72,6 +87,38 @@ func _ready() -> void:
 	_highlight.material_override = _highlight_material
 	add_child(_highlight)
 	_refresh_hud()
+
+
+func _setup_units() -> void:
+	unit_db = UnitDB.new()
+	var problem := unit_db.load_dir("res://data/units")
+	if problem != "":
+		push_error(problem)
+		return
+	for spec in START_UNITS:
+		var def: Dictionary = unit_db.get_def(str(spec["id"]))
+		if def.is_empty():
+			push_error("找不到预设单位：%s" % spec["id"])
+			continue
+		_spawn_unit(def, Vector3(float(spec["x"]), 0.0, float(spec["z"])), str(spec["code"]))
+
+
+func _spawn_unit(def: Dictionary, at: Vector3, code: String) -> void:
+	var flyer := Flyer.new()
+	flyer.name = "%s_%d" % [str(def.get("id", "unit")), units.size() + 1]
+	units_root.add_child(flyer)
+	var ground := world.surface_height(int(at.x), int(at.z))
+	flyer.global_position = Vector3(at.x, float(ground) + 6.0, at.z)
+	flyer.setup(world, def)
+	var controller := UnitController.new()
+	controller.bind(flyer, code, 1)
+	units.append({"unit": flyer, "controller": controller})
+
+
+func _physics_process(delta: float) -> void:
+	for entry in units:
+		var controller: UnitController = entry["controller"]
+		controller.tick(delta)
 
 
 func _install_environment() -> void:
@@ -116,6 +163,7 @@ func _process(_delta: float) -> void:
 		return
 	world.update_streaming(rig.position)
 	_update_highlight()
+	_update_unit_hud()
 
 
 func _update_highlight() -> void:
@@ -204,6 +252,17 @@ func _input(event: InputEvent) -> void:
 	if index >= 0 and index < block_options.size():
 		selected = index
 		_refresh_hud()
+
+
+func _update_unit_hud() -> void:
+	if hud == null or units.is_empty():
+		return
+	var flyer: Flyer = units[0]["unit"]
+	var controller: UnitController = units[0]["controller"]
+	var text := "%s  高度 %.1f 米  电量 %.0f%%" % [flyer.display_name, flyer.global_position.y - float(world.surface_height(floori(flyer.global_position.x), floori(flyer.global_position.z))), flyer.energy_j / flyer.energy_max * 100.0]
+	if controller.halted():
+		text += "\n代码出错：%s" % controller.last_error()
+	hud.set_info(text)
 
 
 func _refresh_hud() -> void:

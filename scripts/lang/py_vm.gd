@@ -15,11 +15,14 @@ const MAX_REPEAT := 1000000
 
 const BUILTINS := [
 	"print", "set_drive", "set_spin", "set_steer", "set_thrust", "get_link",
+	"set_lift", "set_tilt", "set_rcs", "drill",
 	"range", "len", "abs", "min", "max", "int", "float", "str", "round", "bool",
 ]
 
+const DEFAULT_CONTROLS := {"lift": 0.0, "pitch": 0.0, "roll": 0.0, "turn": 0.0, "forward": 0.0, "drill": false}
+
 var globals: Dictionary = {}
-var state: Dictionary = {"drive": 0.0, "spin": {}, "steer": {}, "thrust": {}, "mem": {}}
+var state: Dictionary = {"drive": 0.0, "spin": {}, "steer": {}, "thrust": {}, "mem": {}, "controls": DEFAULT_CONTROLS.duplicate()}
 var logs: Array = []
 var error := ""
 var finished := false
@@ -57,7 +60,7 @@ func load_source(src: String) -> void:
 
 func _reset_runtime() -> void:
 	globals = {"mem": state["mem"], "PI": PI, "E": 2.718281828459045}
-	state = {"drive": 0.0, "spin": {}, "steer": {}, "thrust": {}, "mem": state.get("mem", {})}
+	state = {"drive": 0.0, "spin": {}, "steer": {}, "thrust": {}, "mem": state.get("mem", {}), "controls": DEFAULT_CONTROLS.duplicate()}
 	_apply_part_names()
 	logs = []
 	error = ""
@@ -180,6 +183,7 @@ func _result(done: bool) -> Dictionary:
 		"ok": error == "",
 		"error": error,
 		"logs": logs.duplicate(),
+		"controls": state["controls"].duplicate(),
 		"drive": float(state["drive"]),
 		"spin": spin,
 		"steer": steer,
@@ -446,7 +450,9 @@ func _get_attr(obj, attr: String, op: int, ins: Dictionary):
 		var dict: Dictionary = obj
 		if str(dict.get("__type", "")) == "part":
 			return _part_get(dict, attr, op, ins)
-		return _fail("AttributeError", "字典没有属性 %s，请用 [\"%s\"]" % [attr, attr], op, ins)
+		if dict.has(attr):
+			return dict[attr]
+		return _fail("AttributeError", "字典里没有 %s，请用 [\"%s\"]" % [attr, attr], op, ins)
 	return _fail("AttributeError", "%s 没有属性 %s" % [_type_name(obj), attr], op, ins)
 
 
@@ -455,7 +461,8 @@ func _set_attr(obj, attr: String, value, op: int, ins: Dictionary) -> bool:
 		var dict: Dictionary = obj
 		if str(dict.get("__type", "")) == "part":
 			return _part_set(dict, attr, value, op, ins)
-		return _fail("AttributeError", "字典没有属性 %s" % attr, op, ins)
+		dict[attr] = value
+		return true
 	return _fail("AttributeError", "%s 没有属性 %s" % [_type_name(obj), attr], op, ins)
 
 
@@ -827,6 +834,35 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			if args.size() != 2 or not _is_num(args[1]):
 				return _fail("TypeError", "set_thrust(序号, 牛顿)", op, ins)
 			state["thrust"][int(args[0])] = float(args[1])
+			stack.append(null)
+			return true
+		"set_lift":
+			if args.size() != 1 or not _is_num(args[0]):
+				return _fail("TypeError", "set_lift(0~1 的升力)", op, ins)
+			state["controls"]["lift"] = clampf(float(args[0]), 0.0, 1.0)
+			stack.append(null)
+			return true
+		"set_tilt":
+			if args.size() != 2 or not _is_num(args[0]) or not _is_num(args[1]):
+				return _fail("TypeError", "set_tilt(前后倾, 左右倾) 各 -1~1", op, ins)
+			state["controls"]["pitch"] = clampf(float(args[0]), -1.0, 1.0)
+			state["controls"]["roll"] = clampf(float(args[1]), -1.0, 1.0)
+			stack.append(null)
+			return true
+		"set_rcs":
+			if args.size() != 2 or not _is_num(args[0]) or not _is_num(args[1]):
+				return _fail("TypeError", "set_rcs(转向, 前后) 各 -1~1", op, ins)
+			state["controls"]["turn"] = clampf(float(args[0]), -1.0, 1.0)
+			state["controls"]["forward"] = clampf(float(args[1]), -1.0, 1.0)
+			stack.append(null)
+			return true
+		"drill":
+			if args.size() > 1:
+				return _fail("TypeError", "drill(开关) 只接受 0 或 1 个参数", op, ins)
+			var on := true
+			if args.size() == 1:
+				on = _is_true(args[0])
+			state["controls"]["drill"] = on
 			stack.append(null)
 			return true
 		"get_link":

@@ -1,0 +1,19 @@
+{
+  "id": "feifei",
+  "display_name": "飞飞",
+  "hint": "悬浮侦察机：底部矢量喷口 + 两侧 RCS + 前置激光钻头 + 顶部雷达",
+  "mass": 40.0,
+  "energy_j": 120000.0,
+  "hover_thrust_n": 2100.0,
+  "rcs_thrust_n": 320.0,
+  "gimbal_deg": 24.0,
+  "radar_radius": 2,
+  "drill": {
+    "reach": 3.4,
+    "cooldown": 0.25,
+    "power_w": 1200.0
+  },
+  "idle_power_w": 180.0,
+  "lift_power_w": 1500.0,
+  "rcs_power_w": 420.0
+}

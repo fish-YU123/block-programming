@@ -73,6 +73,11 @@ func id_of(name: String) -> int:
 	return def.id if def != null else AIR
 
 
+func name_of(block_id: int) -> String:
+	var def = _by_id.get(block_id, null)
+	return def.name if def != null else ""
+
+
 func has_block(block_id: int) -> bool:
 	return _by_id.has(block_id)
 

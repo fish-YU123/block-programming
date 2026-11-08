@@ -22,6 +22,7 @@ func _initialize() -> void:
 	_test_chinese_names()
 	_test_sensors()
 	_test_bad_call()
+	_test_controls()
 	_test_compare_ops()
 	print("通过 %d 项，失败 %d 项" % [_passed, _failed])
 	for item in _failures:
@@ -149,6 +150,31 @@ func _run(source: String, max_steps: int = 200, links: Array = [], readings: Dic
 		if vm.error != "":
 			break
 	return {"vm": vm, "logs": logs}
+
+
+func _test_controls() -> void:
+	var run := _run("set_lift(0.8)\nset_tilt(0.2, -0.3)\nset_rcs(-1, 0.5)\ndrill()\n")
+	_expect_no_error("飞飞控制接口", run)
+	var controls: Dictionary = run["vm"].state["controls"]
+	_expect_eq("set_lift", controls["lift"], 0.8)
+	_expect_eq("set_tilt 前后", controls["pitch"], 0.2)
+	_expect_eq("set_tilt 左右", controls["roll"], -0.3)
+	_expect_eq("set_rcs 转向", controls["turn"], -1.0)
+	_expect_eq("set_rcs 前后", controls["forward"], 0.5)
+	_expect_eq("drill 开", controls["drill"], true)
+	var run2 := _run("set_lift(5)\nset_tilt(-3, 3)\n")
+	_expect_eq("set_lift 夹到 1", run2["vm"].state["controls"]["lift"], 1.0)
+	_expect_eq("set_tilt 夹到 -1", run2["vm"].state["controls"]["pitch"], -1.0)
+	_expect_eq("set_tilt 夹到 1", run2["vm"].state["controls"]["roll"], 1.0)
+	var run3 := _run("print(pos.y)\nprint(blocks[1][1])\nprint(heights[0][0])\n", 50, [], {"pos": {"x": 1.0, "y": 2.0, "z": 3.0}, "blocks": [["grass", "grass", "grass"], ["grass", "stone", "grass"], ["grass", "grass", "grass"]], "heights": [[26, 26, 26], [26, 25, 26], [26, 26, 26]]})
+	_expect_logs("传感器字典属性访问", _only_logs(run3, 3), ["2.0", "stone", "26"])
+
+
+func _only_logs(run: Dictionary, count: int) -> Dictionary:
+	var logs: Array = run["logs"]
+	if logs.size() > count:
+		logs = logs.slice(logs.size() - count)
+	return {"vm": run["vm"], "logs": logs}
 
 
 func _expect_logs(name: String, run: Dictionary, expected: Array) -> void:

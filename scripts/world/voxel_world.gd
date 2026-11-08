@@ -120,7 +120,7 @@ func _boundary_color(index: int) -> Color:
 
 
 ## 该列最高的实心方块 y（考虑玩家改动）
-func _surface_y(x: int, z: int) -> int:
+func surface_y(x: int, z: int) -> int:
 	var h := mini(terrain.height_at(x, z), size_y - 1)
 	while h + 1 < size_y and is_solid(Vector3i(x, h + 1, z)):
 		h += 1
@@ -155,10 +155,10 @@ func _rebuild_boundary_line(index: int) -> void:
 
 	# 每段都向相邻列的高度延伸，保证整条线连续、忽略地形落差
 	for z in size_z:
-		var y_a := float(_surface_y(bx, z)) + 1.0 + LINE_LIFT
+		var y_a := float(surface_y(bx, z)) + 1.0 + LINE_LIFT
 		var y_b := y_a
 		if z + 1 < size_z:
-			y_b = float(_surface_y(bx, z + 1)) + 1.0 + LINE_LIFT
+			y_b = float(surface_y(bx, z + 1)) + 1.0 + LINE_LIFT
 		var lo := minf(y_a, y_b)
 		var hi := maxf(y_a, y_b) + h
 		var zf := float(z)
