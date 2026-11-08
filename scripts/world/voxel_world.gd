@@ -475,9 +475,9 @@ func _rebuild(chunk: Chunk) -> void:
 	chunk.built = true
 
 
-## 该格是否允许玩家建造/破坏（中立区禁止）
+## 该格是否允许建造/破坏（现在全图都可建造，保留接口给以后的规则用）
 func is_buildable(cell: Vector3i) -> bool:
-	return not terrain.is_neutral(cell.x)
+	return in_bounds(cell)
 
 
 ## 射线检测：返回 {cell, normal, point}，未命中返回空字典

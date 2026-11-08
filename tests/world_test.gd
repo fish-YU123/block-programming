@@ -58,8 +58,10 @@ func _initialize() -> void:
 	_record("中立区表面和两侧同款方块", big.get_block(Vector3i(128, nh, 77)) == big.get_block(Vector3i(50, big.terrain.height_at(50, 77), 77)) or db.is_solid(big.get_block(Vector3i(128, nh, 77))))
 	_record("中立区地表下是石头/泥土", big.get_block(Vector3i(128, nh - 2, 77)) != BlockDB.AIR)
 	_record("中立区上方是空气", big.get_block(Vector3i(128, nh + 1, 77)) == BlockDB.AIR)
-	_record("中立区禁止建造", not big.is_buildable(Vector3i(128, nh, 77)))
-	_record("两侧可建造", big.is_buildable(Vector3i(50, 20, 77)) and big.is_buildable(Vector3i(200, 20, 77)))
+	_record("中立区可以建造", big.is_buildable(Vector3i(128, nh, 77)))
+	_record("两侧可以建造", big.is_buildable(Vector3i(50, 20, 77)) and big.is_buildable(Vector3i(200, 20, 77)))
+	big.set_block(Vector3i(128, nh + 1, 77), db.id_of("planks"))
+	_record("中立区真的能放方块", big.get_block(Vector3i(128, nh + 1, 77)) == db.id_of("planks"))
 	_record("中立区宽 56", 156 - 100 == 56)
 
 	# 分界线：改方块后标记待重铺

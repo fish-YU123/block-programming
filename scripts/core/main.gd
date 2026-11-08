@@ -168,9 +168,6 @@ func _on_primary_click() -> void:
 	var cell: Vector3i = hit["cell"]
 	if world.get_block(cell) == BlockDB.AIR:
 		return
-	if not world.is_buildable(cell):
-		hud.show_message("中立区不能建造或破坏")
-		return
 	world.set_block(cell, BlockDB.AIR)
 
 
@@ -194,9 +191,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		var place_at := Vector3(cell) + Vector3(0.5, 0.5, 0.5)
 		if place_at.distance_to(rig.camera.global_position) < 0.9:
-			return
-		if not world.is_buildable(cell):
-			hud.show_message("中立区不能建造或破坏")
 			return
 		world.set_block(cell, block_options[selected])
 
