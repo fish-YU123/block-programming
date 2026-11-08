@@ -63,10 +63,14 @@ func _build() -> void:
 	join_button.pressed.connect(func(): join_requested.emit(address_edit.text.strip_edges()))
 	row.add_child(join_button)
 
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 6)
+	box.add_child(row2)
+
 	disconnect_button = Button.new()
 	disconnect_button.text = "断开"
 	disconnect_button.pressed.connect(func(): disconnect_requested.emit())
-	box.add_child(disconnect_button)
+	row2.add_child(disconnect_button)
 
 	status_label = Label.new()
 	status_label.text = "未连接"
