@@ -32,7 +32,7 @@ func _ready() -> void:
 		push_error(problem)
 		return
 	for def in db.defs:
-		if def.id != BlockDB.AIR and def.name != "neutral":
+		if def.id != BlockDB.AIR:
 			block_options.append(def.id)
 	selected = 0
 

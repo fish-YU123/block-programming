@@ -26,7 +26,6 @@ var id_sand := 4
 var id_coal := 5
 var id_copper := 6
 var id_bedrock := 7
-var id_neutral := 9
 
 var _height_cache := {}
 
@@ -41,7 +40,6 @@ func setup(db: BlockDB, world_seed: int) -> void:
 	id_coal = db.id_of("coal_ore")
 	id_copper = db.id_of("copper_ore")
 	id_bedrock = db.id_of("bedrock")
-	id_neutral = db.id_of("neutral")
 	_continent.seed = world_seed
 	_continent.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	_continent.frequency = 0.006
@@ -65,7 +63,7 @@ func zone_of(x: int) -> int:
 	return 2
 
 
-## 中立区：地形照常生成，只是整块换成灰色
+## 中立区：地形与材质都和两侧一样，只是不能建造/破坏
 func is_neutral(x: int) -> bool:
 	return x >= ZONE_A_END and x < ZONE_B_START
 
@@ -95,8 +93,6 @@ func block_at_height(x: int, y: int, z: int, h: int) -> int:
 		return id_air
 	if y <= 0:
 		return id_bedrock
-	if is_neutral(x):
-		return id_neutral
 	if y == h:
 		return id_sand if h <= 20 else id_grass
 	if y >= h - 3:
