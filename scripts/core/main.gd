@@ -38,6 +38,9 @@ var building_db: BuildingDB
 var buildings: Array = []
 var selected_building := 0
 const MAX_BUILDINGS := 12
+## 单位刚体所在的物理层（1 << 1）
+const UNIT_COLLISION_MASK := 2
+const DOUBLE_CLICK_MS := 400
 ## 开局资源（还没做采集经济闭环前的启动资金）
 const STARTING_RESOURCES := {"copper": 120, "coal": 60}
 ## 队伍
@@ -63,6 +66,8 @@ var _highlight: MeshInstance3D
 var _highlight_material: StandardMaterial3D
 var _highlight_array := ArrayMesh.new()
 var _last_cell := Vector3i(999999, 999999, 999999)
+var _last_click_uid := -1
+var _last_click_time := 0
 
 
 func _ready() -> void:
@@ -195,25 +200,28 @@ func _panel_open() -> bool:
 	return code_panel != null and code_panel.is_open()
 
 
-func _toggle_code_panel() -> void:
+func _toggle_code_panel(force_open: bool = false) -> void:
 	if code_panel == null:
 		return
-	if code_panel.is_open():
+	if code_panel.is_open() and not force_open:
 		code_panel.close()
 		return
+	# 只列本方单位，敌方代码不给看
 	var items: Array = []
 	for entry in units:
+		if int(entry.get("team", TEAM_BLUE)) != TEAM_BLUE:
+			continue
 		var flyer: Flyer = entry["unit"]
 		var controller: UnitController = entry["controller"]
 		items.append({
 			"uid": int(entry["uid"]),
-			"label": ("蓝 " if int(entry.get("team", TEAM_BLUE)) == TEAM_BLUE else "红 ") + flyer.name,
+			"label": flyer.name,
 			"error": controller.last_error() if controller.halted() else "",
 		})
 	code_panel.set_units(items)
-	if not units.is_empty():
-		var first: Dictionary = units[0]
-		code_panel.set_code(int(first["uid"]), str(first["code"]))
+	if not items.is_empty():
+		var first_uid: int = int(items[0]["uid"])
+		code_panel.set_code(first_uid, str(_entry_by_uid(first_uid).get("code", "")))
 	code_panel.open()
 	rig.input_enabled = false
 
@@ -613,8 +621,13 @@ func _aim() -> Dictionary:
 	return world.raycast(from, to)
 
 
-func _on_primary_click() -> void:
+func _on_primary_click(at: Vector2) -> void:
 	if _panel_open():
+		return
+	# 先看是不是点在自己单位上：双击打开它的代码
+	var picked := _pick_own_unit(at)
+	if not picked.is_empty():
+		_on_unit_clicked(picked)
 		return
 	var hit := _aim()
 	if hit.is_empty():
@@ -628,6 +641,51 @@ func _on_primary_click() -> void:
 	if drop != "":
 		hud.show_message("挖到 %s（+1）" % drop)
 	_refresh_hud()
+
+
+## 屏幕坐标 → 命中我方单位（返回 units 里的一项，没命中返回空字典）
+func _pick_own_unit(at: Vector2) -> Dictionary:
+	if rig == null or rig.camera == null:
+		return {}
+	var camera: Camera3D = rig.camera
+	var from := camera.project_ray_origin(at)
+	var to := from + camera.project_ray_normal(at) * 120.0
+	var space := get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(from, to, UNIT_COLLISION_MASK)
+	var hit := space.intersect_ray(query)
+	if hit.is_empty():
+		return {}
+	var collider = hit.get("collider")
+	for entry in units:
+		if entry["unit"] == collider and int(entry.get("team", TEAM_BLUE)) == TEAM_BLUE:
+			return entry
+	return {}
+
+
+## 单击记下候选，双击（同一台、0.4 秒内）打开代码面板
+func _on_unit_clicked(entry: Dictionary) -> void:
+	var uid := int(entry["uid"])
+	var now := Time.get_ticks_msec()
+	if uid == _last_click_uid and now - _last_click_time <= DOUBLE_CLICK_MS:
+		_last_click_uid = -1
+		_open_code_for(uid)
+		return
+	_last_click_uid = uid
+	_last_click_time = now
+	var flyer: Flyer = entry["unit"]
+	hud.show_message("%s：再点一次打开代码" % flyer.display_name)
+
+
+## 直接打开某台单位的代码面板（会顺带把面板切到该单位）
+func _open_code_for(uid: int) -> void:
+	if not _panel_open():
+		rig.input_enabled = false
+	_toggle_code_panel(true)
+	code_panel.set_current(uid)
+	var entry := _entry_by_uid(uid)
+	if not entry.is_empty():
+		code_panel.set_code(uid, str(entry["code"]))
+	code_panel.set_current(uid)
 
 
 func _unhandled_input(event: InputEvent) -> void:

@@ -27,7 +27,9 @@ func _check() -> void:
 	_main._toggle_code_panel()
 	_record("按 C 打开面板", panel.is_open(), "没打开")
 	_record("面板打开时相机不响应输入", _main.rig.input_enabled == false, "相机仍可操作")
-	_record("面板列出了单位", panel.unit_list.item_count == _main.units.size(), str(panel.unit_list.item_count))
+	var own_count: int = _main.team_units(0).size()
+	_record("面板只列本方单位", panel.unit_list.item_count == own_count, "%d vs %d" % [panel.unit_list.item_count, own_count])
+	_record("面板不列敌方单位", own_count < _main.units.size() or _main.team_units(1).is_empty(), str(_main.units.size()))
 
 	var uid: int = int(_main.units[0]["uid"])
 	# 先应用一份有语法错误的代码
@@ -48,6 +50,27 @@ func _check() -> void:
 	controller.tick(0.2)
 	panel.show_logs(controller.logs)
 	_record("print 输出进入日志", panel.log_label.text.find("123") >= 0, panel.log_label.text)
+
+	# 屏幕射线能选中本方单位，选不到敌方单位
+	var mine: Array = _main.team_units(0)
+	var my_unit = mine[0]["unit"]
+	var my_screen: Vector2 = _main.rig.camera.unproject_position(my_unit.global_position)
+	var picked: Dictionary = _main._pick_own_unit(my_screen)
+	_record("屏幕射线能选中本方单位", int(picked.get("uid", -1)) == int(mine[0]["uid"]), str(my_screen))
+	var red_units: Array = _main.team_units(1)
+	if not red_units.is_empty():
+		var red = red_units[0]["unit"]
+		var red_screen: Vector2 = _main.rig.camera.unproject_position(red.global_position)
+		_record("点敌方单位不会被当成自己的", _main._pick_own_unit(red_screen).is_empty(), str(red_screen))
+
+	# 双击本方单位 → 打开面板并定位到这一台
+	panel.close()
+	var target_uid: int = int(mine[mine.size() - 1]["uid"])
+	_main._open_code_for(target_uid)
+	_record("双击单位会打开面板", panel.is_open(), "没打开")
+	_record("面板定位到被点的单位", panel.current_uid() == target_uid, "%d vs %d" % [panel.current_uid(), target_uid])
+	_record("编辑器里是该单位的代码", panel.editor.text == str(mine[mine.size() - 1]["code"]), "代码不一致")
+	panel.close()
 
 	# 关闭后恢复操作
 	panel.close()

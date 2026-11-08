@@ -1,7 +1,7 @@
 extends Node3D
 ## 自由飞行相机：鼠标常显，按住左键拖动转视角，WASD 移动。
 
-signal primary_click
+signal primary_click(at: Vector2)
 signal look_changed
 
 @onready var camera: Camera3D = $Camera3D
@@ -39,7 +39,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			elif _pressing:
 				_pressing = false
 				if not dragging:
-					primary_click.emit()
+					primary_click.emit(_press_pos)
 				dragging = false
 		return
 	if event is InputEventMouseMotion and _pressing:

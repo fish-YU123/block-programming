@@ -8,6 +8,7 @@ signal panel_closed
 
 const MONO_FONTS := ["Menlo", "Monaco", "Courier New", "Consolas", "DejaVu Sans Mono"]
 const MAX_LOG_LINES := 12
+const PANEL_WIDTH := 620.0
 
 var root_control: Control
 var editor: CodeEdit
@@ -116,47 +117,59 @@ func show_status(text: String) -> void:
 func _build() -> void:
 	root_control = Control.new()
 	root_control.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root_control.mouse_filter = Control.MOUSE_FILTER_STOP
+	root_control.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root_control)
 
-	var dim := ColorRect.new()
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dim.color = Color(0.03, 0.05, 0.08, 0.82)
-	root_control.add_child(dim)
+	# 贴在屏幕右侧的面板（世界留在左边，方便边看单位边改代码）
+	var panel := PanelContainer.new()
+	panel.anchor_left = 1.0
+	panel.anchor_right = 1.0
+	panel.anchor_top = 0.0
+	panel.anchor_bottom = 1.0
+	panel.offset_left = -PANEL_WIDTH - 16.0
+	panel.offset_right = -16.0
+	panel.offset_top = 16.0
+	panel.offset_bottom = -16.0
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.04, 0.06, 0.10, 0.93)
+	style.border_color = Color(0.25, 0.42, 0.62, 0.8)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(14)
+	panel.add_theme_stylebox_override("panel", style)
+	root_control.add_child(panel)
 
-	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 40)
-	margin.add_theme_constant_override("margin_right", 40)
-	margin.add_theme_constant_override("margin_top", 30)
-	margin.add_theme_constant_override("margin_bottom", 30)
-	root_control.add_child(margin)
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 8)
+	panel.add_child(column)
 
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 18)
-	margin.add_child(row)
-
-	# 左：单位列表
-	var left := VBoxContainer.new()
-	left.custom_minimum_size = Vector2(190, 0)
-	row.add_child(left)
-	var list_title := Label.new()
-	list_title.text = "单位"
-	list_title.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0))
-	left.add_child(list_title)
-	unit_list = ItemList.new()
-	unit_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	unit_list.item_selected.connect(_on_unit_picked)
-	left.add_child(unit_list)
-
-	# 中：代码编辑
-	var center := VBoxContainer.new()
-	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(center)
+	# 标题行
+	var title_row := HBoxContainer.new()
+	column.add_child(title_row)
 	var title := Label.new()
-	title.text = "代码（Python 风格；支持中文名）"
-	title.add_theme_color_override("font_color", Color(0.7, 0.85, 1.0))
-	center.add_child(title)
+	title.text = "单位代码"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", Color(0.72, 0.88, 1.0))
+	title_row.add_child(title)
+	close_button = Button.new()
+	close_button.text = "关闭 C"
+	close_button.pressed.connect(close)
+	title_row.add_child(close_button)
+
+	# 单位列表（只列自己的单位）
+	unit_list = ItemList.new()
+	unit_list.custom_minimum_size = Vector2(0, 96)
+	var list_style := StyleBoxFlat.new()
+	list_style.bg_color = Color(0.07, 0.10, 0.15, 0.95)
+	list_style.set_corner_radius_all(6)
+	list_style.set_content_margin_all(4)
+	unit_list.add_theme_stylebox_override("panel", list_style)
+	unit_list.add_theme_color_override("font_color", Color(0.86, 0.92, 1.0))
+	unit_list.item_selected.connect(_on_unit_picked)
+	column.add_child(unit_list)
+
+	# 代码编辑
 	editor = CodeEdit.new()
 	editor.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -166,61 +179,51 @@ func _build() -> void:
 	var font := SystemFont.new()
 	font.font_names = PackedStringArray(MONO_FONTS)
 	editor.add_theme_font_override("font", font)
-	editor.add_theme_font_size_override("font_size", 15)
+	editor.add_theme_font_size_override("font_size", 14)
 	editor.add_theme_color_override("background_color", Color(0.07, 0.09, 0.13))
 	editor.add_theme_color_override("font_color", Color(0.88, 0.92, 0.96))
-	center.add_child(editor)
+	column.add_child(editor)
 
-	# 右：状态 / 按钮 / 错误 / 日志
-	var right := VBoxContainer.new()
-	right.custom_minimum_size = Vector2(320, 0)
-	right.add_theme_constant_override("separation", 10)
-	row.add_child(right)
-
+	# 应用按钮 + 状态
+	var action_row := HBoxContainer.new()
+	action_row.add_theme_constant_override("separation", 10)
+	column.add_child(action_row)
+	apply_button = Button.new()
+	apply_button.text = "应用代码 ⌘+回车"
+	apply_button.pressed.connect(_on_apply)
+	action_row.add_child(apply_button)
 	status_label = Label.new()
+	status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.add_theme_color_override("font_color", Color(0.8, 0.9, 1.0))
-	right.add_child(status_label)
+	action_row.add_child(status_label)
 
-	apply_button = Button.new()
-	apply_button.text = "应用代码（⌘+回车）"
-	apply_button.pressed.connect(_on_apply)
-	right.add_child(apply_button)
-
-	close_button = Button.new()
-	close_button.text = "关闭（C / Esc）"
-	close_button.pressed.connect(close)
-	right.add_child(close_button)
-
-	var error_title := Label.new()
-	error_title.text = "错误"
-	error_title.add_theme_color_override("font_color", Color(1.0, 0.6, 0.55))
-	right.add_child(error_title)
 	error_label = Label.new()
 	error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	error_label.custom_minimum_size = Vector2(0, 90)
+	error_label.custom_minimum_size = Vector2(0, 34)
 	error_label.add_theme_color_override("font_color", Color(1.0, 0.7, 0.6))
-	right.add_child(error_label)
+	column.add_child(error_label)
 
 	var log_title := Label.new()
 	log_title.text = "print 输出"
 	log_title.add_theme_color_override("font_color", Color(0.6, 0.9, 0.7))
-	right.add_child(log_title)
+	column.add_child(log_title)
 	log_label = Label.new()
 	log_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	log_label.custom_minimum_size = Vector2(0, 140)
+	log_label.custom_minimum_size = Vector2(0, 80)
 	log_label.add_theme_color_override("font_color", Color(0.75, 0.95, 0.8))
 	var log_font := SystemFont.new()
 	log_font.font_names = PackedStringArray(MONO_FONTS)
 	log_label.add_theme_font_override("font", log_font)
 	log_label.add_theme_font_size_override("font_size", 12)
-	right.add_child(log_label)
+	column.add_child(log_label)
 
 	hint_label = Label.new()
 	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint_label.text = "传感器：pos vel cell yaw energy blocks[5][5] heights[5][5] here\n控制：set_lift() set_tilt() set_rcs() drill()\n每个控制中心每秒执行 60 行"
-	hint_label.add_theme_color_override("font_color", Color(0.65, 0.7, 0.78))
-	right.add_child(hint_label)
+	hint_label.text = "传感器：pos vel cell yaw energy blocks[5][5] heights[5][5] here enemies\n控制：set_lift() set_tilt() set_rcs() drill() ｜ 每秒 60 行"
+	hint_label.add_theme_font_size_override("font_size", 11)
+	hint_label.add_theme_color_override("font_color", Color(0.62, 0.68, 0.76))
+	column.add_child(hint_label)
 
 
 func _select_in_list() -> void:
