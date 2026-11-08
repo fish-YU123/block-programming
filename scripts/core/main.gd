@@ -15,6 +15,8 @@ const Production = preload("res://scripts/economy/production.gd")
 const BuildingDB = preload("res://scripts/buildings/building_db.gd")
 const Building = preload("res://scripts/buildings/building.gd")
 const TerrainGen = preload("res://scripts/world/terrain_gen.gd")
+const MpManager = preload("res://scripts/net/mp_manager.gd")
+const MpPanel = preload("res://scripts/ui/mp_panel.gd")
 
 const WORLD_SIZE_X := 256
 const WORLD_SIZE_Z := 256
@@ -31,6 +33,11 @@ var selected := 0
 
 var unit_db: UnitDB
 var code_panel: CodePanel
+## 联机
+var mp: MpManager
+var mp_panel: MpPanel
+## 客户端编辑过的单位代码缓存：uid -> {code, revision}
+var _client_codes: Dictionary = {}
 var economy: Economy
 var production: Production
 var building_db: BuildingDB
@@ -153,6 +160,23 @@ func _ready() -> void:
 	code_panel.unit_selected.connect(_on_unit_selected)
 	code_panel.panel_closed.connect(_on_panel_closed)
 	code_panel.rerun_pressed.connect(_on_code_rerun)
+
+	mp = MpManager.new()
+	mp.name = "MpManager"
+	add_child(mp)
+	mp.world = world
+	mp.replicas_root = units_root
+	mp.unit_def = unit_db.get_def("feifei")
+	mp.units_provider = func(): return _snapshot_units()
+	mp.status_changed.connect(_on_mp_status)
+	mp.code_from_client.connect(_on_mp_code)
+	mp.joined.connect(_on_mp_joined)
+	mp_panel = MpPanel.new()
+	mp_panel.name = "MpPanel"
+	add_child(mp_panel)
+	mp_panel.host_requested.connect(_on_mp_host)
+	mp_panel.join_requested.connect(_on_mp_join)
+	mp_panel.disconnect_requested.connect(_on_mp_disconnect)
 	orders_root = Node3D.new()
 	orders_root.name = "Orders"
 	add_child(orders_root)
@@ -167,6 +191,90 @@ func _ready() -> void:
 	_highlight.material_override = _highlight_material
 	add_child(_highlight)
 	_refresh_hud()
+
+
+## ---------------- 联机 ----------------
+
+## 主机：把当前所有单位的可同步状态打包给快照
+func _snapshot_units() -> Array:
+	var out: Array = []
+	for entry in units:
+		var u: Flyer = entry["unit"]
+		if not u.alive:
+			continue
+		out.append({
+			"uid": int(entry["uid"]),
+			"team": int(entry["team"]),
+			"pos": u.global_position,
+			"vel": u.linear_velocity,
+			"yaw": u.rotation.y,
+			"energy": u.energy_j,
+		})
+	return out
+
+
+## 代码：客户端取本地缓存，主机取本单位代码
+func _code_of(uid: int) -> String:
+	if mp != null and mp.is_client():
+		return str(_client_codes.get(uid, {}).get("code", DefaultCode.FLYER_SOURCE))
+	var entry := _entry_by_uid(uid)
+	if not entry.is_empty():
+		return str(entry["code"])
+	return str(_client_codes.get(uid, {}).get("code", DefaultCode.FLYER_SOURCE))
+
+
+func _on_mp_host() -> void:
+	var err := mp.host_game()
+	if err == "":
+		hud.show_message("房间已开，等别人加入（M 打开面板）")
+
+
+func _on_mp_join(address: String) -> void:
+	if address == "":
+		hud.show_message("请先填主机 IP")
+		return
+	var err := mp.join_game(address)
+	if err == "":
+		hud.show_message("正在连接 %s …" % address)
+
+
+func _on_mp_status(text: String) -> void:
+	if mp_panel != null:
+		mp_panel.set_status(text)
+	if hud != null:
+		hud.show_message(text)
+
+
+func _on_mp_joined(team: int) -> void:
+	_client_codes.clear()
+	# 客户端只看主机同步过来的单位，本地模拟的那些先藏起来（它们不再被更新）
+	for entry in units:
+		var local: Flyer = entry["unit"]
+		local.visible = false
+	hud.show_message("已加入房间：你是%s方（C 打开代码面板）" % ("蓝" if team == TEAM_BLUE else "红"))
+
+
+func _on_mp_disconnect() -> void:
+	if mp == null:
+		return
+	var was_client := mp.is_client()
+	mp.stop()
+	if was_client:
+		# 断开后回到单机：重载场景最省事
+		get_tree().reload_current_scene()
+	else:
+		hud.show_message("已关闭房间")
+
+
+## 主机：收到客户端改的代码，绑定到对应单位上
+func _on_mp_code(uid: int, revision: int, source: String) -> void:
+	var entry := _entry_by_uid(uid)
+	if entry.is_empty():
+		return
+	entry["code"] = source
+	entry["revision"] = revision
+	var controller: UnitController = entry["controller"]
+	controller.bind(entry["unit"], source, revision)
 
 
 func _setup_units() -> void:
@@ -260,24 +368,37 @@ func _toggle_code_panel(force_open: bool = false) -> void:
 		return
 	# 只列本方单位，敌方代码不给看
 	var items: Array = []
-	for entry in units:
-		if int(entry.get("team", TEAM_BLUE)) != TEAM_BLUE:
-			continue
-		var flyer: Flyer = entry["unit"]
-		var controller: UnitController = entry["controller"]
-		items.append({
-			"uid": int(entry["uid"]),
-			"label": flyer.name,
-			"error": controller.last_error() if controller.halted() else "",
-		})
+	if mp != null and mp.is_client():
+		for rep in mp.replicas():
+			if int(rep["team"]) != mp.my_team:
+				continue
+			var node: Flyer = rep["node"]
+			items.append({"uid": int(rep["uid"]), "label": node.name, "error": ""})
+	else:
+		for entry in units:
+			if int(entry.get("team", TEAM_BLUE)) != TEAM_BLUE:
+				continue
+			var flyer: Flyer = entry["unit"]
+			var controller: UnitController = entry["controller"]
+			items.append({
+				"uid": int(entry["uid"]),
+				"label": flyer.name,
+				"error": controller.last_error() if controller.halted() else "",
+			})
 	code_panel.set_units(items)
 	if not items.is_empty():
 		var first_uid: int = int(items[0]["uid"])
-		code_panel.set_code(first_uid, str(_entry_by_uid(first_uid).get("code", "")))
+		code_panel.set_code(first_uid, _code_of(first_uid))
 	code_panel.open()
 
 
 func _on_code_applied(uid: int, code: String) -> void:
+	if mp != null and mp.is_client():
+		_client_codes[uid] = {"code": code, "revision": int(_client_codes.get(uid, {}).get("revision", 0)) + 1}
+		var rev := int(_client_codes[uid]["revision"])
+		mp.send_code(uid, rev, code)
+		code_panel.show_status("已发送到主机（版本 %d）" % rev)
+		return
 	var entry := _entry_by_uid(uid)
 	if entry.is_empty():
 		return
@@ -303,6 +424,9 @@ func _on_code_rerun(uid: int) -> void:
 
 
 func _on_unit_selected(uid: int) -> void:
+	if mp != null and mp.is_client():
+		code_panel.set_code(uid, _code_of(uid))
+		return
 	var entry := _entry_by_uid(uid)
 	if entry.is_empty():
 		return
@@ -317,6 +441,15 @@ func _update_code_panel() -> void:
 	if code_panel == null or not code_panel.is_open():
 		return
 	var uid := code_panel.current_uid()
+	if mp != null and mp.is_client():
+		var found := false
+		for rep in mp.replicas():
+			if int(rep["uid"]) == uid:
+				found = true
+				code_panel.show_status("%s ｜ 联机中（位置来自主机）" % str(rep["node"].name))
+		if not found:
+			code_panel.show_status("联机中：等主机分配单位…")
+		return
 	var entry := _entry_by_uid(uid)
 	if entry.is_empty():
 		return
@@ -333,6 +466,13 @@ func _update_code_panel() -> void:
 
 func _physics_process(delta: float) -> void:
 	_physics_frames += 1
+	if mp != null:
+		if mp.is_client():
+			# 客户端只是看：单位位置全部来自主机快照，本地不跑战斗/生产
+			mp.tick(delta)
+			return
+		if mp.is_host():
+			mp.tick(delta)
 	if production != null:
 		production.tick(delta)
 	_prune_orders()
@@ -1052,9 +1192,7 @@ func _on_unit_clicked(entry: Dictionary) -> void:
 func _open_code_for(uid: int) -> void:
 	_toggle_code_panel(true)
 	code_panel.set_current(uid)
-	var entry := _entry_by_uid(uid)
-	if not entry.is_empty():
-		code_panel.set_code(uid, str(entry["code"]))
+	code_panel.set_code(uid, _code_of(uid))
 	code_panel.set_current(uid)
 
 

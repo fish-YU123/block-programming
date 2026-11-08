@@ -101,7 +101,9 @@ func _check() -> void:
 	_record("每次应用版本号 +1", int(_main.units[0]["revision"]) == rev_before + 1, str(_main.units[0]["revision"]))
 
 	# 面板在右侧，屏幕左上角的鼠标不算"压在面板上"（滚轮应该还能调视野）
-	_record("面板打开时鼠标不在面板上", _main.code_panel.is_open() and not _main.code_panel.mouse_over())
+	# headless 里布局还没跑完，get_global_rect 不可靠；直接验证锚点确实钉在右边
+	var box: PanelContainer = _main.code_panel.panel_box
+	_record("代码面板锚定在右侧", box.anchor_left == 1.0 and box.anchor_right == 1.0 and box.offset_left < 0.0, "anchor=%s offset=%s" % [str(box.anchor_left), str(box.offset_left)])
 
 	print("通过 %d 项，失败 %d 项" % [_passed, _failed])
 	for item in _failures:
