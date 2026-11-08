@@ -100,6 +100,26 @@ def start():
 
 def loop():
     高度 = heights[2][2] + 8
+    if peace > 0:
+        # 发育时间：回自己的半场待命，别去开打
+        if pos.x < 128:
+            if pos.x > 90:
+                set_velocity(-8, 0)
+            else:
+                set_velocity(0, 0)
+        else:
+            if pos.x < 166:
+                set_velocity(8, 0)
+            else:
+                set_velocity(0, 0)
+        drill(False)
+        laser_off()
+        set_altitude(高度)
+    else:
+        _fight()
+
+def _fight():
+    高度 = heights[2][2] + 8
     有敌人 = len(enemies) > 0
     if 有敌人:
         高度 = enemies[0].y

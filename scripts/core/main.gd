@@ -512,6 +512,7 @@ func _physics_process(delta: float) -> void:
 		var self_unit: RigidBody3D = entry["unit"]
 		if self_unit.alive:
 			controller.set_orders(orders_for(self_unit.global_position))
+			controller.set_peace(peace_left)
 		controller.tick(delta)
 	if not in_peace():
 		_process_weapons(delta)
@@ -621,6 +622,9 @@ func _on_block_dug(unit: RigidBody3D, cell: Vector3i, block_id: int) -> void:
 
 ## 炮弹命中结算：沿射击方向找第一个碰到的方块/单位
 func _on_gun_fired(u: RigidBody3D, from: Vector3, dir: Vector3) -> void:
+	# 发育时间内炮也停火（单位代码还在打，但不结算伤害）
+	if in_peace():
+		return
 	var max_len: float = u.gun_reach
 	var end: Vector3 = from + dir * max_len
 	var block_hit: Dictionary = world.raycast(from, end) if world != null else {}
@@ -1481,7 +1485,8 @@ func _update_unit_hud() -> void:
 	var entry: Dictionary = mine[mine.size() - 1]
 	var flyer: RigidBody3D = entry["unit"]
 	var controller: UnitController = entry["controller"]
-	var text := "我方单位 %d 台 ｜ %s  高度 %.1f 米  电量 %.0f%%" % [mine.size(), flyer.display_name, flyer.global_position.y - float(world.surface_height(floori(flyer.global_position.x), floori(flyer.global_position.z))), flyer.energy_j / flyer.energy_max * 100.0]
+	var enemy_count: int = team_units(TEAM_RED).size()
+	var text := "我方 %d 台 ｜ 敌方 %d 台 ｜ %s  高度 %.1f 米  电量 %.0f%%" % [mine.size(), enemy_count, flyer.display_name, flyer.global_position.y - float(world.surface_height(floori(flyer.global_position.x), floori(flyer.global_position.z))), flyer.energy_j / flyer.energy_max * 100.0]
 	if controller.halted():
 		text += "\n代码出错：%s" % controller.last_error()
 	hud.set_info(text + "\nC 打开代码面板")

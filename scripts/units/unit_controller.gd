@@ -17,6 +17,8 @@ var logs: Array = []
 
 var enemies: Array = []
 var orders: Array = []
+## 开局发育时间剩余秒数（>0 时双方不能攻击）
+var peace_left := 0.0
 
 var _vm: PyVM
 ## 一"段"代码执行期间的列表类传感器快照（敌方/标记/雷达），
@@ -52,6 +54,10 @@ func set_enemies(list: Array) -> void:
 
 
 ## 由主场景每帧更新：玩家标记的指令（[{"x","y","z","action","id","dist"}]，按距离排序）
+func set_peace(seconds: float) -> void:
+	peace_left = seconds
+
+
 func set_orders(list: Array) -> void:
 	orders = list
 
@@ -189,4 +195,5 @@ func _inject_sensors(refresh_lists: bool) -> void:
 		"enemies": _list_snapshot["enemies"],
 		"orders": _list_snapshot["orders"],
 		"moving": unit.moving,
+		"peace": peace_left,
 	})
