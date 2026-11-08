@@ -51,6 +51,7 @@ func _ready() -> void:
 	camera.current = true
 	rig.add_child(camera)
 	add_child(rig)
+	rig.primary_click.connect(_on_primary_click)
 
 	var mid := Vector3(WORLD_SIZE_X * 0.5, 0, WORLD_SIZE_Z * 0.5)
 	var h := world.surface_height(int(mid.x), int(mid.z))
@@ -160,21 +161,27 @@ func _aim() -> Dictionary:
 	return world.raycast(from, to)
 
 
-func _unhandled_input(event: InputEvent) -> void:
-	if not (event is InputEventMouseButton):
-		return
-	if not event.pressed or rig == null or not rig.mouse_captured:
-		return
+func _on_primary_click() -> void:
 	var hit := _aim()
-	if event.button_index == MOUSE_BUTTON_LEFT:
-		if hit.is_empty():
-			return
-		var cell: Vector3i = hit["cell"]
-		if world.get_block(cell) == BlockDB.AIR:
-			return
-		world.set_block(cell, BlockDB.AIR)
+	if hit.is_empty():
+		return
+	var cell: Vector3i = hit["cell"]
+	if world.get_block(cell) == BlockDB.AIR:
+		return
+	world.set_block(cell, BlockDB.AIR)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not (event is InputEventMouseButton) or not event.pressed:
+		return
+	if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+		selected = (selected + 1) % block_options.size()
 		_refresh_hud()
-	elif event.button_index == MOUSE_BUTTON_RIGHT:
+	elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		selected = (selected - 1 + block_options.size()) % block_options.size()
+		_refresh_hud()
+	elif event.button_index == MOUSE_BUTTON_RIGHT and rig != null:
+		var hit := _aim()
 		if hit.is_empty():
 			return
 		var cell: Vector3i = hit["cell"] + hit["normal"]
@@ -186,9 +193,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		if place_at.distance_to(rig.camera.global_position) < 0.9:
 			return
 		world.set_block(cell, block_options[selected])
-		_refresh_hud()
-	elif event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-		pass
 
 
 func _input(event: InputEvent) -> void:

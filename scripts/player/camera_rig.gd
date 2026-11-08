@@ -1,5 +1,8 @@
 extends Node3D
-## 自由飞行相机：鼠标看方向，WASD 移动，空格/Shift 升降，滚轮调速度。
+## 自由飞行相机：鼠标常显，按住左键拖动转视角，WASD 移动。
+
+signal primary_click
+signal look_changed
 
 @onready var camera: Camera3D = $Camera3D
 
@@ -7,52 +10,45 @@ var yaw := 0.0
 var pitch := -0.25
 var move_speed := 14.0
 var fast_multiplier := 3.0
-var mouse_sensitivity := 0.0025
-var mouse_captured := false
+var mouse_sensitivity := 0.0035
+var dragging := false
 
 const MIN_SPEED := 1.0
 const MAX_SPEED := 60.0
+const DRAG_THRESHOLD := 4.0
+
+var _pressing := false
+var _press_pos := Vector2.ZERO
 
 
 func _ready() -> void:
-	capture_mouse()
-
-
-func capture_mouse() -> void:
-	mouse_captured = true
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-
-
-func release_mouse() -> void:
-	mouse_captured = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed:
-		if not mouse_captured:
-			capture_mouse()
-			get_viewport().set_input_as_handled()
-			return
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			move_speed = clampf(move_speed * 1.15, MIN_SPEED, MAX_SPEED)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			move_speed = clampf(move_speed / 1.15, MIN_SPEED, MAX_SPEED)
-	elif event is InputEventMouseMotion and mouse_captured:
-		yaw -= event.relative.x * mouse_sensitivity
-		pitch = clampf(pitch - event.relative.y * mouse_sensitivity, -1.55, 1.55)
-	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		if mouse_captured:
-			release_mouse()
-		else:
-			get_tree().quit()
-		get_viewport().set_input_as_handled()
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				_pressing = true
+				dragging = false
+				_press_pos = event.position
+			elif _pressing:
+				_pressing = false
+				if not dragging:
+					primary_click.emit()
+				dragging = false
+		return
+	if event is InputEventMouseMotion and _pressing:
+		if not dragging and event.position.distance_to(_press_pos) > DRAG_THRESHOLD:
+			dragging = true
+		if dragging:
+			yaw -= event.relative.x * mouse_sensitivity
+			pitch = clampf(pitch - event.relative.y * mouse_sensitivity, -1.55, 1.55)
+			look_changed.emit()
 
 
 func _process(delta: float) -> void:
 	rotation = Vector3(pitch, yaw, 0.0)
-	if not mouse_captured:
-		return
 	var dir := Vector3.ZERO
 	var basis := Basis.from_euler(Vector3(0.0, yaw, 0.0))
 	if Input.is_key_pressed(KEY_W):
@@ -72,6 +68,12 @@ func _process(delta: float) -> void:
 		speed *= fast_multiplier
 	if dir.length_squared() > 0.0:
 		position += dir.normalized() * speed * delta
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_MOUSE_EXIT:
+		_pressing = false
+		dragging = false
 
 
 func look_direction() -> Vector3:
