@@ -177,6 +177,7 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 	# 蓝方面朝 +X、红方面朝 -X
 	flyer.rotation.y = -PI * 0.5 if team == TEAM_BLUE else PI * 0.5
 	var controller := UnitController.new()
+	flyer.gun_fired.connect(_on_gun_fired)
 	controller.bind(flyer, code, 1)
 	units.append({"uid": _next_uid, "unit": flyer, "controller": controller, "code": code, "revision": 1, "team": team, "cost": economy.unit_cost(def) if economy != null else {}})
 	_next_uid += 1
@@ -301,12 +302,131 @@ func _physics_process(delta: float) -> void:
 	for entry in units:
 		var controller: UnitController = entry["controller"]
 		controller.tick(delta)
+	_process_weapons(delta)
 	_process_combat(delta)
 	_purge_dead()
 	_check_victory()
 
 
-## 把敌方单位的位置塞给每个单位的传感器（按距离排序，最近的前 8 个）
+## ---------------- 武器：激光（5 格）与炮管（15 格） ----------------
+
+## 命中判定用的单位半径（米）
+const WEAPON_UNIT_RADIUS := 0.45
+
+## 方块受击累计伤害：Vector3i -> float（方块血量见 BlockDB.hp_of）
+var _block_damage: Dictionary = {}
+
+
+func _process_weapons(delta: float) -> void:
+	for entry in units:
+		var u: Flyer = entry["unit"]
+		if not u.alive:
+			continue
+		_resolve_laser(u, delta)
+
+
+## 激光：朝玩家给的方向打一条 5 格光束，对第一个碰到的方块/单位持续伤害
+func _resolve_laser(u: Flyer, delta: float) -> void:
+	if not u.laser_on:
+		u.clear_laser()
+		return
+	var from := u.muzzle_world()
+	var dir := u.laser_target - from
+	if dir.length() < 0.001:
+		dir = u.forward_dir()
+	dir = dir.normalized()
+	var max_len := u.laser_reach
+	var end := from + dir * max_len
+	var block_hit: Dictionary = world.raycast(from, end) if world != null else {}
+	var block_t := max_len
+	var block_cell := Vector3i.ZERO
+	var limit := max_len
+	if not block_hit.is_empty():
+		block_t = from.distance_to(block_hit["point"])
+		block_cell = block_hit["cell"]
+		limit = block_t
+	var unit_hit: Dictionary = _unit_ray_hit(u, from, dir, limit)
+	if not unit_hit.is_empty():
+		end = unit_hit["point"]
+		var victim: Flyer = unit_hit["unit"]
+		victim.take_damage(u.laser_dps_unit * delta)
+		u.laser_hits += 1
+	elif not block_hit.is_empty():
+		end = block_hit["point"]
+		_damage_block(block_cell, u.laser_dps_block * delta)
+	u.draw_laser(from, end)
+
+
+## 炮弹命中结算：沿射击方向找第一个碰到的方块/单位
+func _on_gun_fired(u: Flyer, from: Vector3, dir: Vector3) -> void:
+	var max_len := u.gun_reach
+	var end := from + dir * max_len
+	var block_hit: Dictionary = world.raycast(from, end) if world != null else {}
+	var limit := max_len
+	var block_cell := Vector3i.ZERO
+	if not block_hit.is_empty():
+		limit = from.distance_to(block_hit["point"])
+		block_cell = block_hit["cell"]
+	var unit_hit: Dictionary = _unit_ray_hit(u, from, dir, limit)
+	if not unit_hit.is_empty():
+		end = unit_hit["point"]
+		var victim: Flyer = unit_hit["unit"]
+		victim.take_damage(u.gun_damage_unit)
+	elif not block_hit.is_empty():
+		end = block_hit["point"]
+		_damage_block(block_cell, u.gun_damage_block)
+	u.draw_tracer(from, end)
+
+
+## 射线与敌方单位求交（球体近似），返回最近命中 {unit, point}，没命中返回空字典
+func _unit_ray_hit(shooter: Flyer, from: Vector3, dir: Vector3, max_dist: float) -> Dictionary:
+	var best_t := max_dist
+	var best: Dictionary = {}
+	for entry in units:
+		var target: Flyer = entry["unit"]
+		if target == shooter or not target.alive or int(target.team) == int(shooter.team):
+			continue
+		var oc := from - target.global_position
+		var b := dir.dot(oc)
+		var c := oc.dot(oc) - WEAPON_UNIT_RADIUS * WEAPON_UNIT_RADIUS
+		var disc := b * b - c
+		if disc < 0.0:
+			continue
+		var t := -b - sqrt(disc)
+		if t < 0.0:
+			t = 0.0
+		if t > best_t:
+			continue
+		best_t = t
+		best = {"unit": target, "point": from + dir * t}
+	return best
+
+
+## 对某个方块累计伤害；血量打光就挖掉。返回是否打掉了
+func _damage_block(cell: Vector3i, amount: float) -> bool:
+	if world == null or amount <= 0.0:
+		return false
+	var block_id := world.get_block(cell)
+	if block_id == BlockDB.AIR:
+		return false
+	if world.db.name_of(block_id) == "bedrock":
+		return false
+	var hp := world.db.hp_of(block_id)
+	var total := float(_block_damage.get(cell, 0.0)) + amount
+	if total >= hp:
+		_block_damage.erase(cell)
+		world.set_block(cell, BlockDB.AIR)
+		return true
+	_block_damage[cell] = total
+	return false
+
+
+## 某个方块已承受的伤害（测试用）
+func block_damage_at(cell: Vector3i) -> float:
+	return float(_block_damage.get(cell, 0.0))
+
+
+## 把敌方单位的位置塞给每个单位的传感器（10 米内，按距离排序，最近的前 8 个）
 func _refresh_enemy_sensors() -> void:
 	for entry in units:
 		var self_unit: Flyer = entry["unit"]
@@ -316,18 +436,22 @@ func _refresh_enemy_sensors() -> void:
 		var found: Array = []
 		for other in team_units(enemy_team):
 			var o: Flyer = other["unit"]
+			if not o.alive:
+				continue
+			var dist: float = self_unit.global_position.distance_to(o.global_position)
+			if dist > self_unit.radar_unit_range:
+				continue
 			found.append({
 				"x": o.global_position.x,
 				"y": o.global_position.y,
 				"z": o.global_position.z,
-				"d": self_unit.global_position.distance_to(o.global_position),
+				"type": o.unit_id,
+				"hp": o.hp,
+				"dist": dist,
 			})
-		found.sort_custom(func(a, b): return float(a["d"]) < float(b["d"]))
-		var top: Array = found.slice(0, 8)
-		for item in top:
-			item.erase("d")
+		found.sort_custom(func(a, b): return float(a["dist"]) < float(b["dist"]))
 		var controller: UnitController = entry["controller"]
-		controller.set_enemies(top)
+		controller.set_enemies(found.slice(0, 8))
 
 
 ## ---------------- 建筑（M4：挖矿 / 产单位） ----------------

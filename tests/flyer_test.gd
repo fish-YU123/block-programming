@@ -140,7 +140,7 @@ func _visual_aabb(node: Node3D) -> AABB:
 	var stack: Array = [node]
 	while not stack.is_empty():
 		var current = stack.pop_back()
-		if current is MeshInstance3D and current.mesh != null:
+		if current is MeshInstance3D and current.mesh != null and current.visible:
 			var aabb: AABB = current.global_transform * current.mesh.get_aabb()
 			if first:
 				result = aabb

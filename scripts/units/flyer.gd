@@ -1,9 +1,12 @@
 extends RigidBody3D
 ## 预设单位「飞飞」：悬浮飞行器。
 ## 底部矢量喷口提供升力（可偏转产生侧移）、两侧 RCS 前后喷口负责平移与转向、
-## 前置激光钻头可挖方块、顶部小雷达扫描周围 5×5 的方块。
+## 前置激光钻头可挖方块、机背炮管可远程射击、顶部小雷达扫描周围 5×5×5 的方块与 10 米内单位。
 
 const BlockDB = preload("res://scripts/world/block_db.gd")
+
+## 炮管开火（主场景据此结算命中与伤害）
+signal gun_fired(unit, from: Vector3, direction: Vector3)
 
 var world: Node3D
 var unit_id := "feifei"
@@ -26,12 +29,29 @@ var unit_size := 0.75
 var drill_reach := 3.4
 var drill_cooldown := 0.25
 var drill_power_w := 1200.0
+## 激光（挖掘/切割）：5 格拉一条持续光束，对第一个命中的方块或单位持续伤害
+var laser_reach := 5.0
+var laser_dps_block := 80.0
+var laser_dps_unit := 22.0
+var laser_power_w := 700.0
+## 炮管：15 格射程，单发伤害
+var gun_reach := 15.0
+var gun_cooldown := 1.0
+var gun_damage_block := 60.0
+var gun_damage_unit := 34.0
+var gun_energy_j := 2400.0
+## 雷达能看到的敌方单位数量上限与距离
+var radar_unit_range := 10.0
 var idle_power_w := 180.0
 var lift_power_w := 1500.0
 var rcs_power_w := 420.0
 
 ## 由玩家代码写入：lift/pitch/roll 0..1 或 -1..1，turn/forward -1..1，drill bool
-var controls := {"lift": 0.0, "pitch": 0.0, "roll": 0.0, "turn": 0.0, "forward": 0.0, "drill": false}
+var controls := {
+	"lift": 0.0, "pitch": 0.0, "roll": 0.0, "turn": 0.0, "forward": 0.0, "drill": false,
+	"laser": false, "laser_x": 0.0, "laser_y": 0.0, "laser_z": 0.0,
+	"shoot": false, "shoot_x": 0.0, "shoot_y": 0.0, "shoot_z": 0.0,
+}
 var runtime_error := ""
 var runtime_logs: Array = []
 var energy_out := false
@@ -40,6 +60,15 @@ var thrust_now := 0.0
 
 var _nozzle: Node3D
 var _drill_cd := 0.0
+var _gun_cd := 0.0
+var _beam: MeshInstance3D
+var _tracer: MeshInstance3D
+var _tracer_left := 0.0
+## 本帧是否在打激光、以及瞄准点（由 main 每帧读取后结算伤害）
+var laser_on := false
+var laser_target := Vector3.ZERO
+var laser_hits := 0
+var shots_fired := 0
 
 
 func setup(world_node: Node3D, def: Dictionary) -> void:
@@ -63,6 +92,18 @@ func setup(world_node: Node3D, def: Dictionary) -> void:
 	idle_power_w = float(def.get("idle_power_w", 180.0))
 	lift_power_w = float(def.get("lift_power_w", 1500.0))
 	rcs_power_w = float(def.get("rcs_power_w", 420.0))
+	var laser: Dictionary = def.get("laser", {})
+	laser_reach = float(laser.get("reach", 5.0))
+	laser_dps_block = float(laser.get("dps_block", 80.0))
+	laser_dps_unit = float(laser.get("dps_unit", 22.0))
+	laser_power_w = float(laser.get("power_w", 700.0))
+	var gun: Dictionary = def.get("gun", {})
+	gun_reach = float(gun.get("reach", 15.0))
+	gun_cooldown = float(gun.get("cooldown", 1.0))
+	gun_damage_block = float(gun.get("damage_block", 60.0))
+	gun_damage_unit = float(gun.get("damage_unit", 34.0))
+	gun_energy_j = float(gun.get("energy_j", 2400.0))
+	radar_unit_range = float(def.get("radar_unit_range", 10.0))
 
 	mass = mass_kg
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
@@ -89,10 +130,25 @@ func _physics_process(delta: float) -> void:
 	var forward := clampf(float(controls.get("forward", 0.0)), -1.0, 1.0)
 	var drilling := bool(controls.get("drill", false))
 
+	# 武器状态
+	laser_on = bool(controls.get("laser", false)) and not energy_out and energy_j > 0.0
+	laser_target = Vector3(
+		float(controls.get("laser_x", 0.0)),
+		float(controls.get("laser_y", 0.0)),
+		float(controls.get("laser_z", 0.0))
+	)
+	_gun_cd = maxf(0.0, _gun_cd - delta)
+	# 开火请求：一次调用打一发，打完后清掉标志
+	var shoot_requested := bool(controls.get("shoot", false))
+	if shoot_requested:
+		controls["shoot"] = false
+
 	# 能耗
 	var power := idle_power_w + lift * lift_power_w + (absf(turn) + absf(forward)) * rcs_power_w
 	if drilling:
 		power += drill_power_w
+	if laser_on:
+		power += laser_power_w
 	energy_j = maxf(0.0, energy_j - power * delta)
 	energy_out = energy_j <= 0.0
 	if energy_out:
@@ -100,6 +156,21 @@ func _physics_process(delta: float) -> void:
 		turn = 0.0
 		forward = 0.0
 		drilling = false
+		laser_on = false
+
+	if shoot_requested and _gun_cd <= 0.0 and energy_j >= gun_energy_j:
+		_gun_cd = gun_cooldown
+		energy_j = maxf(0.0, energy_j - gun_energy_j)
+		shots_fired += 1
+		_fire_gun_once()
+	else:
+		_gun_cd = maxf(0.0, _gun_cd - 0.0)
+
+	# 曳光弹视觉效果衰减
+	if _tracer_left > 0.0:
+		_tracer_left = maxf(0.0, _tracer_left - delta)
+		if _tracer_left <= 0.0 and _tracer != null:
+			_tracer.visible = false
 
 	# 卡进方块里时自己抬出来（防止被地形吞掉后永远出不来）
 	if world != null:
@@ -134,6 +205,61 @@ func _physics_process(delta: float) -> void:
 	if drilling and _drill_cd <= 0.0:
 		_drill_cd = drill_cooldown
 		_drill_once()
+
+
+## 炮口/激光发射口的世界坐标（机头前上方）
+func muzzle_world() -> Vector3:
+	return global_position + global_transform.basis * Vector3(0.0, 0.14 * unit_size / 0.75, -0.42 * unit_size / 0.75)
+
+
+## 机体前向
+func forward_dir() -> Vector3:
+	return -global_transform.basis.z
+
+
+## 打一发光束/炮弹的视觉效果（伤害在 main 里结算）
+func _fire_gun_once() -> void:
+	gun_fired.emit(self, muzzle_world(), forward_dir())
+
+
+## 在两点之间画一根细柱（激光/曳光弹共用）
+func _draw_segment(node: MeshInstance3D, from: Vector3, to: Vector3, width: float) -> void:
+	if node == null:
+		return
+	var dir := to - from
+	var length := dir.length()
+	if length < 0.001:
+		node.visible = false
+		return
+	node.visible = true
+	node.global_position = from + dir * 0.5
+	var mesh: CylinderMesh = node.mesh
+	if mesh != null:
+		mesh.top_radius = width
+		mesh.bottom_radius = width
+		mesh.height = length
+	# 让圆柱的 +Y 轴对准 from→to 方向
+	var y_axis := dir / length
+	var helper := Vector3.RIGHT if absf(y_axis.dot(Vector3.RIGHT)) < 0.9 else Vector3.FORWARD
+	var x_axis := helper.cross(y_axis).normalized()
+	var z_axis := y_axis.cross(x_axis)
+	node.global_basis = Basis(x_axis, y_axis, z_axis)
+
+
+## 激光束：从炮口到命中点；传 null 表示关闭
+func draw_laser(from: Vector3, to: Vector3) -> void:
+	_draw_segment(_beam, from, to, 0.035)
+
+
+func clear_laser() -> void:
+	if _beam != null:
+		_beam.visible = false
+
+
+## 炮弹曳光（短暂显示）
+func draw_tracer(from: Vector3, to: Vector3) -> void:
+	_draw_segment(_tracer, from, to, 0.02)
+	_tracer_left = 0.08
 
 
 ## 受到伤害；血量归零则失去战斗能力
@@ -215,7 +341,31 @@ func radar() -> Dictionary:
 			row_heights.append(h)
 		names.append(row_names)
 		heights.append(row_heights)
-	return {"blocks": names, "heights": heights}
+	return {"blocks": names, "heights": heights, "blocks3": _radar_blocks3()}
+
+
+## 以单位所在格为中心的 5×5×5 三维方块名
+## blocks3[dx + r][dy + r][dz + r]，dx/dy/dz 相对单位所在格，范围 -r..r
+func _radar_blocks3() -> Array:
+	var r := radar_radius
+	var cx := floori(global_position.x)
+	var cy := floori(global_position.y)
+	var cz := floori(global_position.z)
+	var out: Array = []
+	for dx in range(-r, r + 1):
+		var plane: Array = []
+		for dy in range(-r, r + 1):
+			var row: Array = []
+			for dz in range(-r, r + 1):
+				var name := "air"
+				if world != null:
+					var cell := Vector3i(cx + dx, cy + dy, cz + dz)
+					if world.in_bounds(cell):
+						name = world.db.name_of(world.get_block(cell))
+				row.append(name)
+			plane.append(row)
+		out.append(plane)
+	return out
 
 
 ## 单位自己所在那一格的方块名
@@ -338,6 +488,61 @@ func _build_visual() -> void:
 	radar.position = Vector3(0, 0.1, 0.16)
 	radar.material_override = glass_mat
 	model.add_child(radar)
+
+	# 机背炮管（沿 -Z 伸出），带一小段炮尾
+	var gun_mat := StandardMaterial3D.new()
+	gun_mat.albedo_color = Color(0.16, 0.17, 0.2)
+	gun_mat.metallic = 0.7
+	gun_mat.roughness = 0.35
+	var barrel := MeshInstance3D.new()
+	var barrel_mesh := CylinderMesh.new()
+	barrel_mesh.top_radius = 0.028
+	barrel_mesh.bottom_radius = 0.032
+	barrel_mesh.height = 0.4
+	barrel.mesh = barrel_mesh
+	barrel.position = Vector3(0, 0.14, -0.18)
+	barrel.rotation.x = PI * 0.5
+	barrel.material_override = gun_mat
+	model.add_child(barrel)
+	var muzzle := MeshInstance3D.new()
+	var muzzle_mesh := CylinderMesh.new()
+	muzzle_mesh.top_radius = 0.05
+	muzzle_mesh.bottom_radius = 0.05
+	muzzle_mesh.height = 0.06
+	muzzle.mesh = muzzle_mesh
+	muzzle.position = Vector3(0, 0.14, -0.4)
+	muzzle.rotation.x = PI * 0.5
+	muzzle.material_override = gun_mat
+	model.add_child(muzzle)
+
+	# 激光/曳光弹：直接挂在机体上（不随 model 缩放），运行时动态调整位置与长度
+	var beam_mat := StandardMaterial3D.new()
+	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	beam_mat.albedo_color = Color(1.0, 0.35, 0.15)
+	beam_mat.emission_enabled = true
+	beam_mat.emission = Color(1.0, 0.35, 0.1)
+	beam_mat.emission_energy_multiplier = 3.0
+	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_beam = MeshInstance3D.new()
+	var beam_mesh := CylinderMesh.new()
+	beam_mesh.top_radius = 0.035
+	beam_mesh.bottom_radius = 0.035
+	beam_mesh.height = 1.0
+	_beam.mesh = beam_mesh
+	_beam.material_override = beam_mat
+	_beam.visible = false
+	_beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_beam)
+	_tracer = MeshInstance3D.new()
+	var tracer_mesh := CylinderMesh.new()
+	tracer_mesh.top_radius = 0.02
+	tracer_mesh.bottom_radius = 0.02
+	tracer_mesh.height = 1.0
+	_tracer.mesh = tracer_mesh
+	_tracer.material_override = beam_mat
+	_tracer.visible = false
+	_tracer.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_tracer)
 
 	# 碰撞体（略小于外接立方体，避免卡方块）
 	var shape := CollisionShape3D.new()

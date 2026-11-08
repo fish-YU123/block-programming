@@ -15,11 +15,15 @@ const MAX_REPEAT := 1000000
 
 const BUILTINS := [
 	"print", "set_drive", "set_spin", "set_steer", "set_thrust", "get_link",
-	"set_lift", "set_tilt", "set_rcs", "drill",
+	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot",
 	"range", "len", "abs", "min", "max", "int", "float", "str", "round", "bool",
 ]
 
-const DEFAULT_CONTROLS := {"lift": 0.0, "pitch": 0.0, "roll": 0.0, "turn": 0.0, "forward": 0.0, "drill": false}
+const DEFAULT_CONTROLS := {
+	"lift": 0.0, "pitch": 0.0, "roll": 0.0, "turn": 0.0, "forward": 0.0, "drill": false,
+	"laser": false, "laser_x": 0.0, "laser_y": 0.0, "laser_z": 0.0,
+	"shoot": false, "shoot_x": 0.0, "shoot_y": 0.0, "shoot_z": 0.0,
+}
 
 var globals: Dictionary = {}
 var state: Dictionary = {"drive": 0.0, "spin": {}, "steer": {}, "thrust": {}, "mem": {}, "controls": DEFAULT_CONTROLS.duplicate()}
@@ -889,6 +893,30 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			if args.size() == 1:
 				on = _is_true(args[0])
 			state["controls"]["drill"] = on
+			stack.append(null)
+			return true
+		"laser":
+			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
+				return _fail("TypeError", "laser(x, y, z)：朝这个方块坐标打激光", op, ins)
+			state["controls"]["laser"] = true
+			state["controls"]["laser_x"] = float(args[0])
+			state["controls"]["laser_y"] = float(args[1])
+			state["controls"]["laser_z"] = float(args[2])
+			stack.append(null)
+			return true
+		"laser_off":
+			if args.size() != 0:
+				return _fail("TypeError", "laser_off() 不接受参数", op, ins)
+			state["controls"]["laser"] = false
+			stack.append(null)
+			return true
+		"shoot":
+			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
+				return _fail("TypeError", "shoot(x, y, z)：朝这个方块坐标开炮", op, ins)
+			state["controls"]["shoot"] = true
+			state["controls"]["shoot_x"] = float(args[0])
+			state["controls"]["shoot_y"] = float(args[1])
+			state["controls"]["shoot_z"] = float(args[2])
 			stack.append(null)
 			return true
 		"get_link":

@@ -206,6 +206,17 @@ func _test_controls() -> void:
 	_expect_eq("set_lift 夹到 1", run2["vm"].state["controls"]["lift"], 1.0)
 	_expect_eq("set_tilt 夹到 -1", run2["vm"].state["controls"]["pitch"], -1.0)
 	_expect_eq("set_tilt 夹到 1", run2["vm"].state["controls"]["roll"], 1.0)
+	var run_w := _run("laser(10, 20, 30)\nshoot(40, 20, 128)\n")
+	_expect_no_error("武器接口", run_w)
+	var wc: Dictionary = run_w["vm"].state["controls"]
+	_expect_eq("laser 开", wc["laser"], true)
+	_expect_eq("laser 目标 x", wc["laser_x"], 10.0)
+	_expect_eq("laser 目标 z", wc["laser_z"], 30.0)
+	_expect_eq("shoot 请求", wc["shoot"], true)
+	_expect_eq("shoot 目标 y", wc["shoot_y"], 20.0)
+	var run_off := _run("laser(1, 2, 3)\nlaser_off()\n")
+	_expect_eq("laser_off 关掉", run_off["vm"].state["controls"]["laser"], false)
+
 	var run3 := _run("print(pos.y)\nprint(blocks[1][1])\nprint(heights[0][0])\n", 50, [], {"pos": {"x": 1.0, "y": 2.0, "z": 3.0}, "blocks": [["grass", "grass", "grass"], ["grass", "stone", "grass"], ["grass", "grass", "grass"]], "heights": [[26, 26, 26], [26, 25, 26], [26, 26, 26]]})
 	_expect_logs("传感器字典属性访问", _only_logs(run3, 3), ["2.0", "stone", "26"])
 

@@ -82,6 +82,16 @@ func has_block(block_id: int) -> bool:
 	return _by_id.has(block_id)
 
 
+## 方块血量：硬度越高越硬（基岩极硬，基本打不动）
+func hp_of(block_id: int) -> float:
+	var d := get_def(block_id)
+	if d == null:
+		return 0.0
+	if d.name == "bedrock":
+		return 999999.0
+	return maxf(1.0, d.hardness * 30.0)
+
+
 func is_solid(block_id: int) -> bool:
 	var def = _by_id.get(block_id, null)
 	return def != null and def.solid

@@ -89,6 +89,14 @@ func tick(delta: float) -> void:
 		"turn": float(controls.get("turn", 0.0)),
 		"forward": float(controls.get("forward", 0.0)),
 		"drill": bool(controls.get("drill", false)),
+		"laser": bool(controls.get("laser", false)),
+		"laser_x": float(controls.get("laser_x", 0.0)),
+		"laser_y": float(controls.get("laser_y", 0.0)),
+		"laser_z": float(controls.get("laser_z", 0.0)),
+		"shoot": bool(controls.get("shoot", false)),
+		"shoot_x": float(controls.get("shoot_x", 0.0)),
+		"shoot_y": float(controls.get("shoot_y", 0.0)),
+		"shoot_z": float(controls.get("shoot_z", 0.0)),
 	}
 	unit.runtime_error = ""
 	unit.runtime_logs = logs
@@ -111,7 +119,11 @@ func _advance() -> void:
 
 
 func _apply_idle_controls() -> void:
-	unit.controls = {"lift": 0.0, "pitch": 0.0, "roll": 0.0, "turn": 0.0, "forward": 0.0, "drill": false}
+	unit.controls = {
+		"lift": 0.0, "pitch": 0.0, "roll": 0.0, "turn": 0.0, "forward": 0.0, "drill": false,
+		"laser": false, "laser_x": 0.0, "laser_y": 0.0, "laser_z": 0.0,
+		"shoot": false, "shoot_x": 0.0, "shoot_y": 0.0, "shoot_z": 0.0,
+	}
 	unit.runtime_logs = logs
 
 
@@ -129,6 +141,7 @@ func _inject_sensors() -> void:
 		"drill_hits": s["drill_hits"],
 		"blocks": radar["blocks"],
 		"heights": radar["heights"],
+		"blocks3": radar.get("blocks3", []),
 		"here": unit.block_here(),
 		"enemies": enemies,
 	})
