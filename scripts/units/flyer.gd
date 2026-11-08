@@ -10,6 +10,7 @@ signal gun_fired(unit, from: Vector3, direction: Vector3)
 ## 钻头挖掉了一个方块
 signal block_dug(unit, cell: Vector3i, block_id: int)
 
+const PathFinder = preload("res://scripts/world/path_finder.gd")
 var world: Node3D
 var unit_id := "feifei"
 var display_name := "飞飞"
@@ -20,6 +21,13 @@ var energy_max := 1.0
 var hover_thrust := 2100.0
 var rcs_thrust := 320.0
 var gimbal_rad := 0.42
+## ---- 自动驾驶（A* 寻路） ----
+var path: Array = []
+var has_goal := false
+var moving := false
+var _goal := Vector3.ZERO
+const PATH_MAX_SPEED := 9.0
+const PATH_REACH := 1.0
 var radar_radius := 2
 ## 队伍（0=蓝方玩家，1=红方）
 var team := 0
@@ -124,7 +132,59 @@ func setup(world_node: Node3D, def: Dictionary) -> void:
 
 # ---------------------------------------------------------------- 物理
 
+## 让单位自动飞到某个点：内部用 A* 算航路，然后自己压着航路飞
+func request_go(target: Vector3) -> void:
+	if has_goal and target.distance_to(_goal) < 1.2:
+		return
+	_goal = target
+	has_goal = true
+	path = PathFinder.find_path(world, global_position, _goal) if world != null else [_goal]
+	if path.is_empty():
+		path = [_goal]
+	moving = true
+
+
+func clear_go() -> void:
+	has_goal = false
+	moving = false
+	path.clear()
+
+
+## 每物理帧：沿着航路算推力方向，直接覆盖 controls 里的 lift/pitch/roll
+func _autopilot() -> void:
+	if not has_goal:
+		return
+	while not path.is_empty():
+		var wp: Vector3 = path[0]
+		if global_position.distance_to(wp) < PATH_REACH:
+			path.remove_at(0)
+		else:
+			break
+	if path.is_empty():
+		if global_position.distance_to(_goal) < 1.5:
+			moving = false
+		return
+	moving = true
+	var wp: Vector3 = path[0]
+	var to := wp - global_position
+	var horiz := Vector3(to.x, 0.0, to.z)
+	var v_des := Vector3.ZERO
+	if horiz.length() > 0.25:
+		var speed: float = clampf(horiz.length() * 1.4, 1.0, PATH_MAX_SPEED)
+		v_des = horiz.normalized() * speed
+	var dv := v_des - Vector3(linear_velocity.x, 0.0, linear_velocity.z)
+	var acc := dv.limit_length(1.0)
+	var local := global_transform.basis.inverse() * acc
+	controls["roll"] = clampf(asin(clampf(local.x, -1.0, 1.0)) / gimbal_rad, -1.0, 1.0)
+	controls["pitch"] = clampf(asin(clampf(-local.z, -1.0, 1.0)) / gimbal_rad, -1.0, 1.0)
+	controls["lift"] = clampf(0.57 + (wp.y - global_position.y) * 0.16 - linear_velocity.y * 0.12, 0.0, 1.0)
+	controls["turn"] = 0.0
+	controls["forward"] = 0.0
+
+
 func _physics_process(delta: float) -> void:
+	_autopilot()
+
 	var lift := clampf(float(controls.get("lift", 0.0)), 0.0, 1.0)
 	var pitch := clampf(float(controls.get("pitch", 0.0)), -1.0, 1.0)
 	var roll := clampf(float(controls.get("roll", 0.0)), -1.0, 1.0)

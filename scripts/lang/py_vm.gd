@@ -15,7 +15,7 @@ const MAX_REPEAT := 1000000
 
 const BUILTINS := [
 	"print", "set_drive", "set_spin", "set_steer", "set_thrust", "get_link",
-	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot",
+	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot", "go_to", "stop",
 	"range", "len", "abs", "min", "max", "int", "float", "str", "round", "bool",
 ]
 
@@ -23,6 +23,7 @@ const DEFAULT_CONTROLS := {
 	"lift": 0.0, "pitch": 0.0, "roll": 0.0, "turn": 0.0, "forward": 0.0, "drill": false,
 	"laser": false, "laser_x": 0.0, "laser_y": 0.0, "laser_z": 0.0,
 	"shoot": false, "shoot_x": 0.0, "shoot_y": 0.0, "shoot_z": 0.0,
+	"go": false, "go_x": 0.0, "go_y": 0.0, "go_z": 0.0,
 }
 
 var globals: Dictionary = {}
@@ -917,6 +918,21 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			state["controls"]["shoot_x"] = float(args[0])
 			state["controls"]["shoot_y"] = float(args[1])
 			state["controls"]["shoot_z"] = float(args[2])
+			stack.append(null)
+			return true
+		"go_to":
+			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
+				return _fail("TypeError", "go_to(x, y, z)：自动寻路飞到这个坐标", op, ins)
+			state["controls"]["go"] = true
+			state["controls"]["go_x"] = float(args[0])
+			state["controls"]["go_y"] = float(args[1])
+			state["controls"]["go_z"] = float(args[2])
+			stack.append(null)
+			return true
+		"stop":
+			if args.size() != 0:
+				return _fail("TypeError", "stop() 不接受参数", op, ins)
+			state["controls"]["go"] = false
 			stack.append(null)
 			return true
 		"get_link":

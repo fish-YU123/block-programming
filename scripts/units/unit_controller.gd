@@ -104,6 +104,16 @@ func tick(delta: float) -> void:
 		"shoot_y": float(controls.get("shoot_y", 0.0)),
 		"shoot_z": float(controls.get("shoot_z", 0.0)),
 	}
+	# 自动驾驶指令：go_to(x,y,z) / stop()
+	var go := bool(controls.get("go", false))
+	if go:
+		unit.request_go(Vector3(
+			float(controls.get("go_x", 0.0)),
+			float(controls.get("go_y", 0.0)),
+			float(controls.get("go_z", 0.0))
+		))
+	elif unit.has_goal:
+		unit.clear_go()
 	unit.runtime_error = ""
 	unit.runtime_logs = logs
 
@@ -130,6 +140,7 @@ func _apply_idle_controls() -> void:
 		"laser": false, "laser_x": 0.0, "laser_y": 0.0, "laser_z": 0.0,
 		"shoot": false, "shoot_x": 0.0, "shoot_y": 0.0, "shoot_z": 0.0,
 	}
+	unit.clear_go()
 	unit.runtime_logs = logs
 
 
@@ -151,4 +162,5 @@ func _inject_sensors() -> void:
 		"here": unit.block_here(),
 		"enemies": enemies,
 		"orders": orders,
+		"moving": unit.moving,
 	})

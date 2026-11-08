@@ -214,6 +214,11 @@ func _test_controls() -> void:
 	_expect_eq("set_tilt 前后", controls["pitch"], 0.2)
 	_expect_eq("set_tilt 左右", controls["roll"], -0.3)
 	_expect_eq("set_rcs 转向", controls["turn"], -1.0)
+	var go_run := _run("go_to(10, 20, 30)\n")
+	var c2: Dictionary = go_run["vm"].state["controls"]
+	_record("go_to 写入目标", bool(c2["go"]) and float(c2["go_x"]) == 10.0 and float(c2["go_y"]) == 20.0 and float(c2["go_z"]) == 30.0, str(c2))
+	var stop_run := _run("go_to(1, 2, 3)\nstop()\n")
+	_record("stop 取消自动驾驶", not bool(stop_run["vm"].state["controls"]["go"]), str(stop_run["vm"].state["controls"]))
 	_expect_eq("set_rcs 前后", controls["forward"], 0.5)
 	_expect_eq("drill 开", controls["drill"], true)
 	var run2 := _run("set_lift(5)\nset_tilt(-3, 3)\n")
