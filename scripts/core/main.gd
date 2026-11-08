@@ -12,6 +12,9 @@ const DefaultCode = preload("res://scripts/units/unit_code_default.gd")
 const CodePanel = preload("res://scripts/ui/code_panel.gd")
 const Economy = preload("res://scripts/economy/economy.gd")
 const Production = preload("res://scripts/economy/production.gd")
+const BuildingDB = preload("res://scripts/buildings/building_db.gd")
+const Building = preload("res://scripts/buildings/building.gd")
+const TerrainGen = preload("res://scripts/world/terrain_gen.gd")
 
 const WORLD_SIZE_X := 256
 const WORLD_SIZE_Z := 256
@@ -30,6 +33,11 @@ var unit_db: UnitDB
 var code_panel: CodePanel
 var economy: Economy
 var production: Production
+var building_db: BuildingDB
+## 已有的建筑：{def_id, node, team, kind, timer}
+var buildings: Array = []
+var selected_building := 0
+const MAX_BUILDINGS := 12
 ## 开局资源（还没做采集经济闭环前的启动资金）
 const STARTING_RESOURCES := {"copper": 120, "coal": 60}
 ## 队伍
@@ -40,12 +48,13 @@ const RED_START := [{"x": 226.0, "z": 108.0}, {"x": 232.0, "z": 128.0}, {"x": 22
 ## 激光钻头打单位：每秒伤害 / 有效距离
 const DRILL_DAMAGE_PER_SEC := 45.0
 const DRILL_UNIT_RANGE := 3.2
-## 每项：{uid, unit, controller, code, revision}
+## 每项：{uid, unit, controller, code, revision, team, cost}
 var units: Array = []
 var _next_uid := 1
 var game_over := ""
 var _physics_frames := 0
 var units_root: Node3D
+var buildings_root: Node3D
 ## 预设单位 + 玩家代码（现在还没有编辑器，先用默认代码）
 const MAX_UNITS := 20
 const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.FLYER_SOURCE}]
@@ -101,6 +110,14 @@ func _ready() -> void:
 	units_root.name = "Units"
 	add_child(units_root)
 	_setup_units()
+
+	building_db = BuildingDB.new()
+	var building_problem := building_db.load_dir("res://data/buildings")
+	if building_problem != "":
+		push_error(building_problem)
+	buildings_root = Node3D.new()
+	buildings_root.name = "Buildings"
+	add_child(buildings_root)
 
 	hud = Hud.new()
 	hud.name = "Hud"
@@ -247,6 +264,7 @@ func _physics_process(delta: float) -> void:
 	if production != null:
 		production.tick(delta)
 	_refresh_enemy_sensors()
+	_tick_buildings(delta)
 	for entry in units:
 		var controller: UnitController = entry["controller"]
 		controller.tick(delta)
@@ -277,6 +295,179 @@ func _refresh_enemy_sensors() -> void:
 			item.erase("d")
 		var controller: UnitController = entry["controller"]
 		controller.set_enemies(top)
+
+
+## ---------------- 建筑（M4：挖矿 / 产单位） ----------------
+
+
+func building_ids() -> Array[String]:
+	return building_db.order if building_db != null else [] as Array[String]
+
+
+func _current_building_id() -> String:
+	var ids := building_ids()
+	if ids.is_empty():
+		return ""
+	return ids[clampi(selected_building, 0, ids.size() - 1)]
+
+
+func _cycle_building(step: int) -> void:
+	var ids := building_ids()
+	if ids.is_empty():
+		return
+	selected_building = (selected_building + step + ids.size()) % ids.size()
+	_refresh_hud()
+	hud.show_message("当前建筑：%s（%d/%d）" % [str(building_db.get_def(ids[selected_building]).get("display_name", ids[selected_building])), selected_building + 1, ids.size()])
+
+
+## 建筑占位是否合法：在自己那半边、地形上方、占位格全空、不与已有建筑重叠
+func _building_placement(at_cell: Vector3i, team: int, size: Vector3i) -> Dictionary:
+	var reason := ""
+	if buildings.size() >= MAX_BUILDINGS:
+		return {"ok": false, "reason": "建筑数量上限 %d" % MAX_BUILDINGS}
+	if team == TEAM_BLUE and at_cell.x + size.x > TerrainGen.ZONE_A_END:
+		reason = "只能在自己的半场建造"
+	elif team == TEAM_RED and at_cell.x < TerrainGen.ZONE_B_START:
+		reason = "只能在自己的半场建造"
+	if reason == "":
+		for dx in size.x:
+			for dz in size.z:
+				var cell := Vector3i(at_cell.x + dx, at_cell.y, at_cell.z + dz)
+				if not world.in_bounds(cell) or at_cell.y + size.y > world.size_y:
+					reason = "超出世界边界"
+					break
+				for dy in size.y:
+					if world.get_block(Vector3i(cell.x, at_cell.y + dy, cell.z)) != BlockDB.AIR:
+						reason = "地盘被方块占了，先挖空"
+						break
+				if reason != "":
+					break
+			if reason != "":
+				break
+	if reason == "":
+		for entry in buildings:
+			var node = entry["node"]
+			for dy in size.y:
+				if node.occupies(Vector3i(at_cell.x, at_cell.y + dy, at_cell.z)) \
+						or node.occupies(Vector3i(at_cell.x + size.x - 1, at_cell.y + dy, at_cell.z + size.z - 1)):
+					reason = "和已有建筑重叠"
+					break
+			if reason != "":
+				break
+	return {"ok": reason == "", "reason": reason}
+
+
+func _place_building() -> void:
+	if building_db == null or buildings.size() >= MAX_BUILDINGS:
+		hud.show_message("建筑数量上限 %d" % MAX_BUILDINGS)
+		return
+	var def_id := _current_building_id()
+	if def_id == "":
+		return
+	var def: Dictionary = building_db.get_def(def_id)
+	var cost: Dictionary = building_db.cost_of(def_id)
+	if not economy.can_afford(cost):
+		hud.show_message("资源不足：%s" % _cost_text(cost))
+		return
+	var size: Vector3i = building_db.size_of(def_id)
+	var hit := _aim()
+	if hit.is_empty():
+		hud.show_message("准星指着地面再放建筑")
+		return
+	var base := Vector3i(hit["cell"]) + Vector3i(hit["normal"])
+	var problem := place_building_at(def_id, base, TEAM_BLUE)
+	if problem != "":
+		hud.show_message(problem)
+		return
+	hud.show_message("建好 %s（%s）" % [str(def.get("display_name", def_id)), _cost_text(cost)])
+
+
+## 程序化放置（输入处理和测试共用）：成功返回空串，失败返回原因
+func place_building_at(def_id: String, base: Vector3i, team: int = TEAM_BLUE) -> String:
+	if building_db == null or not building_db.has(def_id):
+		return "没有这种建筑：%s" % def_id
+	var def: Dictionary = building_db.get_def(def_id)
+	var cost: Dictionary = building_db.cost_of(def_id)
+	var size: Vector3i = building_db.size_of(def_id)
+	if not economy.can_afford(cost):
+		return "资源不足：%s" % _cost_text(cost)
+	var check := _building_placement(base, team, size)
+	if not check["ok"]:
+		return str(check["reason"])
+	economy.spend(cost)
+	var node := Building.new()
+	node.name = "building_%d" % (buildings.size() + 1)
+	buildings_root.add_child(node)
+	node.setup(world, def, base, team)
+	buildings.append({"id": def_id, "node": node, "team": team, "timer": 0.0, "cost": cost})
+	return ""
+
+
+func _remove_last_building() -> void:
+	if buildings.is_empty():
+		hud.show_message("还没有建筑")
+		return
+	var entry: Dictionary = buildings.pop_back()
+	var node = entry["node"]
+	node.queue_free()
+	economy.refund(entry["cost"])
+	hud.show_message("拆掉一栋建筑，资源已退回")
+
+
+func _tick_buildings(delta: float) -> void:
+	for entry in buildings:
+		var node = entry["node"]
+		if not is_instance_valid(node):
+			continue
+		entry["timer"] = float(entry["timer"]) + delta
+		var def: Dictionary = building_db.get_def(str(entry["id"]))
+		var kind := str(def.get("kind", ""))
+		var period := maxf(float(def.get("period", 1.0)), 0.01)
+		if float(entry["timer"]) < period:
+			continue
+		entry["timer"] = 0.0
+		if kind == "miner":
+			_mine_with(node, def)
+		elif kind == "factory":
+			_produce_unit(node)
+
+
+func _mine_with(node, def: Dictionary) -> void:
+	var center: Vector3i = node.center_cell()
+	var depth := int(def.get("mine_depth", 10))
+	for i in depth:
+		var cell := Vector3i(center.x, center.y - 1 - i, center.z)
+		if not world.in_bounds(cell):
+			return
+		var block_id := world.get_block(cell)
+		if block_id == BlockDB.AIR:
+			continue
+		if block_id == db.id_of("bedrock"):
+			return
+		var drop := economy.mine_block(block_id)
+		world.set_block(cell, BlockDB.AIR)
+		node.produced += 1
+		if drop != "":
+			hud.show_message("采矿机挖到 %s" % drop)
+		return
+
+
+func _produce_unit(node) -> void:
+	var def: Dictionary = building_db.get_def(str(node.def.get("id", "")))
+	var unit_id := str(def.get("unit", "feifei"))
+	var unit_def: Dictionary = unit_db.get_def(unit_id)
+	if unit_def.is_empty():
+		return
+	if units.size() >= MAX_UNITS:
+		return
+	var cost: Dictionary = economy.unit_cost(unit_def)
+	if not economy.can_afford(cost):
+		return
+	economy.spend(cost)
+	var point: Vector3 = node.spawn_point()
+	_spawn_unit(unit_def, point, DefaultCode.FLYER_SOURCE, int(node.team))
+	node.produced += 1
+	hud.show_message("组装厂下线一台 %s" % str(unit_def.get("display_name", unit_id)))
 
 
 func team_units(team: int) -> Array:
@@ -480,6 +671,15 @@ func _input(event: InputEvent) -> void:
 	if event.keycode == KEY_G:
 		_remove_last_unit()
 		return
+	if event.keycode == KEY_Q:
+		_cycle_building(-1 if event.shift_pressed else 1)
+		return
+	if event.keycode == KEY_B:
+		_place_building()
+		return
+	if event.keycode == KEY_N:
+		_remove_last_building()
+		return
 	var index := -1
 	if event.keycode >= KEY_1 and event.keycode <= KEY_9:
 		index = event.keycode - KEY_1
@@ -559,4 +759,8 @@ func _refresh_hud() -> void:
 	if hud == null:
 		return
 	var def := db.get_def(block_options[selected])
-	hud.set_block_name("手持：%s（%d/%d）" % [def.display_name if def != null else "?", selected + 1, block_options.size()])
+	var building_name := "-"
+	var building_id := _current_building_id()
+	if building_id != "":
+		building_name = str(building_db.get_def(building_id).get("display_name", building_id))
+	hud.set_block_name("手持：%s（%d/%d） ｜ 建筑：%s" % [def.display_name if def != null else "?", selected + 1, block_options.size(), building_name])

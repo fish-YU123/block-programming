@@ -1,0 +1,10 @@
+{
+  "id": "factory",
+  "display_name": "组装厂",
+  "kind": "factory",
+  "size": [3, 3, 3],
+  "cost": {"copper": 40, "coal": 30},
+  "period": 18.0,
+  "unit": "feifei",
+  "color": [0.95, 0.62, 0.24]
+}

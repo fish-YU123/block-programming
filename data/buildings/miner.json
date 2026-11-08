@@ -1,0 +1,10 @@
+{
+  "id": "miner",
+  "display_name": "采矿机",
+  "kind": "miner",
+  "size": [3, 2, 3],
+  "cost": {"copper": 20, "coal": 10},
+  "period": 1.2,
+  "mine_depth": 10,
+  "color": [0.32, 0.52, 0.92]
+}
