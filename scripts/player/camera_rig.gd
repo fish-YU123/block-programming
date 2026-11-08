@@ -24,11 +24,10 @@ const FOV_MIN := 35.0
 const FOV_MAX := 100.0
 const FOV_STEP := 5.0
 
-## 拖动时把鼠标藏起来（HIDDEN 模式：光标不可见但仍会移动），
-## 光标快贴到窗口边缘时把它挪回中心，避免转到屏幕边缘就转不动；
-## 松手后回到按下时的位置。
-var _warp_target := Vector2.ZERO
-var _awaiting_warp := false
+## 拖动时像 Minecraft 那样每帧把鼠标传回按下点：位置不动，视角能无限转
+var _lock_pos := Vector2.ZERO
+## 上一帧事件里鼠标相对锁定点的偏移，用来算增量（比 relative 更抗 warp 干扰）
+var _last_offset := Vector2.ZERO
 
 var _pressing := false
 var _press_pos := Vector2.ZERO
@@ -74,8 +73,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				dragging = false
 				_press_pos = event.position
 				_saved_mouse = event.position
+				_lock_pos = event.position
+				_last_offset = Vector2.ZERO
 				_drag_amount = 0.0
-				_awaiting_warp = false
 				# 拖动期间把光标藏起来：换成 1×1 全透明光标，不动鼠标模式
 				if _blank_cursor != null:
 					Input.set_custom_mouse_cursor(_blank_cursor, Input.CURSOR_ARROW)
@@ -90,29 +90,28 @@ func _unhandled_input(event: InputEvent) -> void:
 				dragging = false
 		return
 	if event is InputEventMouseMotion and _pressing:
-		# 光标被 warp 回中心时系统会补发一个事件，跳过它，免得视角跳一下
-		if _awaiting_warp and event.position.distance_to(_warp_target) < 1.0:
-			_awaiting_warp = false
+		# 鼠标每帧被传回按下点，所以用"相对锁定点的偏移"算增量：
+		# warp 产生的事件偏移是 0，天然不会转；且不会因为光标撞到屏幕边就停转
+		var offset: Vector2 = event.position - _lock_pos
+		var delta: Vector2 = offset - _last_offset
+		_last_offset = offset
+		if delta.length() > 60.0:
 			return
-		_drag_amount += absf(event.relative.x) + absf(event.relative.y)
+		_drag_amount += delta.length()
 		if not dragging and _drag_amount > DRAG_THRESHOLD:
 			dragging = true
 		if dragging:
-			yaw -= event.relative.x * mouse_sensitivity
-			pitch = clampf(pitch - event.relative.y * mouse_sensitivity, -1.55, 1.55)
+			yaw -= delta.x * mouse_sensitivity
+			pitch = clampf(pitch - delta.y * mouse_sensitivity, -1.55, 1.55)
 			look_changed.emit()
-			# 光标贴边就挪回窗口中心，这样能一直往同方向转
-			var vp := get_viewport().get_visible_rect().size
-			var edge := 24.0
-			if event.position.x < edge or event.position.y < edge \
-					or event.position.x > vp.x - edge or event.position.y > vp.y - edge:
-				_warp_target = vp * 0.5
-				_awaiting_warp = true
-				Input.warp_mouse(_warp_target)
 
 
 func _process(delta: float) -> void:
 	rotation = Vector3(pitch, yaw, 0.0)
+	if _pressing:
+		# Minecraft 式：每帧把鼠标传回按下点，位置保持不变
+		_last_offset = Vector2.ZERO
+		Input.warp_mouse(_lock_pos)
 	if not input_enabled:
 		return
 	var dir := Vector3.ZERO
@@ -137,7 +136,7 @@ func _process(delta: float) -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_MOUSE_EXIT:
+	if what == NOTIFICATION_WM_MOUSE_EXIT or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		if _pressing:
 			Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
 		_pressing = false
