@@ -19,6 +19,7 @@ func _process(_delta: float) -> bool:
 	if _frames == 2:
 		_main.world.build_all()
 		_main._start_game()
+		_main.skip_peace()
 	if _frames == 3:
 		_check()
 	return false

@@ -29,6 +29,7 @@ func _process(_delta: float) -> bool:
 	if _frames == 2:
 		_main.world.build_all()
 		_main._start_game()
+		_main.skip_peace()
 	if _frames == 3:
 		var def: Dictionary = _main.unit_db.get_def("rover")
 		_record("单位表里有车车", not def.is_empty(), str(def.get("display_name", "")))

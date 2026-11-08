@@ -11,6 +11,7 @@ var debug_label: Label
 var resources_label: Label
 var overlay_label: Label
 var loading_label: Label
+var peace_label: Label
 var _loading_bg: ColorRect
 var _message_timer := 0.0
 
@@ -58,6 +59,19 @@ func _ready() -> void:
 
 	loading_label = Label.new()
 	loading_label.set_anchors_preset(Control.PRESET_CENTER)
+	peace_label = Label.new()
+	peace_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	peace_label.position = Vector2(-260, 24)
+	peace_label.size = Vector2(520, 30)
+	peace_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	peace_label.add_theme_font_size_override("font_size", 20)
+	peace_label.add_theme_color_override("font_color", Color(0.72, 0.92, 1.0))
+	peace_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	peace_label.add_theme_constant_override("shadow_offset_x", 2)
+	peace_label.add_theme_constant_override("shadow_offset_y", 2)
+	peace_label.text = ""
+	add_child(peace_label)
+
 	_loading_bg = ColorRect.new()
 	_loading_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_loading_bg.color = Color(0.02, 0.04, 0.08, 0.78)
@@ -120,11 +134,17 @@ func set_info(text: String) -> void:
 func set_loading_mode(on: bool) -> void:
 	if _loading_bg != null:
 		_loading_bg.visible = on
-	for node in [info_label, block_label, hint_label, resources_label, message_label, crosshair]:
+	for node in [info_label, block_label, hint_label, resources_label, message_label, crosshair, peace_label]:
 		if node != null:
 			node.visible = not on
 	if loading_label != null and not on:
 		loading_label.text = ""
+
+
+## 开局发育倒计时（空串则隐藏）
+func set_peace(text: String) -> void:
+	if peace_label != null:
+		peace_label.text = text
 
 
 func set_loading(text: String) -> void:

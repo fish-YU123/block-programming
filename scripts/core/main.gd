@@ -23,7 +23,8 @@ const MatCache = preload("res://scripts/core/mat_cache.gd")
 const WORLD_SIZE_X := 256
 const WORLD_SIZE_Z := 256
 const WORLD_HEIGHT := 64
-const WORLD_SEED := 20261108
+## 每局随机地形；想复现某张图可以在命令行加 --world-seed=12345
+var world_seed := 0
 const REACH := 8.0
 
 var db: BlockDB
@@ -62,6 +63,9 @@ const TEAM_BLUE := 0
 const TEAM_RED := 1
 ## 红方脚本单位：开局 1 台，跟蓝方 1 台对打
 const RED_START := [{"x": 222.0, "z": 128.0}]
+## 开局发育时间（秒）：这段时间双方都不能互相攻击，只能挖矿、造建筑、写代码
+const PEACE_SECONDS := 60.0
+var peace_left := PEACE_SECONDS
 ## 激光钻头打单位：每秒伤害 / 有效距离
 ## 鼠标射线能够多远
 const AIM_RANGE := 40.0
@@ -116,7 +120,8 @@ func _ready() -> void:
 	world = VoxelWorld.new()
 	world.name = "World"
 	add_child(world)
-	world.setup(db, WORLD_SEED, WORLD_SIZE_X, WORLD_SIZE_Z, WORLD_HEIGHT)
+	world_seed = _pick_world_seed()
+	world.setup(db, world_seed, WORLD_SIZE_X, WORLD_SIZE_Z, WORLD_HEIGHT)
 	_install_environment()
 
 	rig = CameraRig.new()
@@ -501,16 +506,53 @@ func _physics_process(delta: float) -> void:
 	_prune_orders()
 	_refresh_enemy_sensors()
 	_tick_buildings(delta)
+	_tick_peace(delta)
 	for entry in units:
 		var controller: UnitController = entry["controller"]
 		var self_unit: RigidBody3D = entry["unit"]
 		if self_unit.alive:
 			controller.set_orders(orders_for(self_unit.global_position))
 		controller.tick(delta)
-	_process_weapons(delta)
-	_process_combat(delta)
+	if not in_peace():
+		_process_weapons(delta)
+		_process_combat(delta)
 	_purge_dead()
 	_check_victory()
+
+
+## ---------------- 开局发育时间 ----------------
+
+## 是否还在发育时间（60 秒内双方不能互相攻击）
+func in_peace() -> bool:
+	return peace_left > 0.0
+
+
+## 跳过发育时间（测试和调试用）
+func skip_peace() -> void:
+	peace_left = 0.0
+	_peace_label_seconds = -1
+	if hud != null:
+		hud.set_peace("")
+
+
+func _tick_peace(delta: float) -> void:
+	if peace_left <= 0.0:
+		return
+	peace_left = maxf(0.0, peace_left - delta)
+	if peace_left <= 0.0:
+		if hud != null:
+			hud.set_peace("")
+			hud.show_message("发育时间结束，可以开打了", 4.0)
+		return
+	# 每秒刷新一次倒计时显示
+	var seconds := int(ceil(peace_left))
+	if seconds != _peace_label_seconds:
+		_peace_label_seconds = seconds
+		if hud != null:
+			hud.set_peace("发育时间 %d 秒（双方不能互相攻击）" % seconds)
+
+
+var _peace_label_seconds := -1
 
 
 ## ---------------- 武器：激光（5 格）与炮管（15 格） ----------------
@@ -523,6 +565,9 @@ var _block_damage: Dictionary = {}
 
 
 func _process_weapons(delta: float) -> void:
+	# 发育时间内激光和炮都停火
+	if in_peace():
+		return
 	for entry in units:
 		var u: RigidBody3D = entry["unit"]
 		if not u.alive:
@@ -1029,6 +1074,9 @@ func team_units(team: int) -> Array:
 
 ## 激光钻头打敌方单位：正前方、距离够近、正在钻
 func _process_combat(delta: float) -> void:
+	# 发育时间内不打仗
+	if in_peace():
+		return
 	for attacker_entry in units:
 		var attacker: RigidBody3D = attacker_entry["unit"]
 		if not attacker.alive or not bool(attacker.controls.get("drill", false)):
@@ -1137,6 +1185,16 @@ func _loading_finished() -> bool:
 		return true
 	var total := world.chunk_count_x() * world.chunk_count_z()
 	return world.chunks.size() >= total and world.pending.is_empty() and world.dirty_count() == 0
+
+
+## 随机种子：命令行给了 --world-seed=N 就用它（方便复现 / 测试），否则每局都换一张图
+func _pick_world_seed() -> int:
+	for arg in OS.get_cmdline_args() + OS.get_cmdline_user_args():
+		if arg.begins_with("--world-seed="):
+			return int(arg.substr("--world-seed=".length()))
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	return rng.randi_range(1, 2000000000)
 
 
 ## 世界建好后正式开始：生成双方单位、恢复操作、收起进度条

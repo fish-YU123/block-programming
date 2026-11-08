@@ -7,6 +7,7 @@ var _failed := 0
 var _failures: Array = []
 var _main: Node
 var _frames := 0
+var _peace_checked := false
 
 
 func _initialize() -> void:
@@ -20,8 +21,28 @@ func _process(_delta: float) -> bool:
 		_main.world.build_all()
 		_main._start_game()
 	if _frames == 3:
+		_check_peace()
+		_main.skip_peace()
+		_record("跳过发育时间后可以攻击", not _main.in_peace(), "")
 		_check()
 	return false
+
+
+## 发育时间内双方不能互相攻击
+func _check_peace() -> void:
+	_record("开局处于发育时间", _main.in_peace(), "剩余 %.1f 秒" % _main.peace_left)
+	var blue: Array = _main.team_units(0)
+	var red: Array = _main.team_units(1)
+	var attacker: Node3D = blue[0]["unit"]
+	var victim: Node3D = red[0]["unit"]
+	attacker.global_position = Vector3(60.0, 40.0, 128.0)
+	attacker.rotation.y = -PI * 0.5
+	victim.global_position = Vector3(60.9, 40.0, 128.0)
+	attacker.controls["drill"] = true
+	var hp_before: float = victim.hp
+	_main._process_combat(0.5)
+	_record("发育时间内钻头打不掉血", is_equal_approx(victim.hp, hp_before), "%.1f → %.1f" % [hp_before, victim.hp])
+	attacker.controls["drill"] = false
 
 
 func _check() -> void:

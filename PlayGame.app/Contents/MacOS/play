@@ -1,0 +1,31 @@
+#!/bin/sh
+# 双击 PlayGame.app 启动游戏；游戏退出后这个进程结束，不会留下终端窗口
+APP_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
+KEY_FILE="$APP_DIR/.godot_path"
+
+if [ -n "$GODOT" ] && [ -x "$GODOT" ]; then
+	GODOT_BIN="$GODOT"
+elif [ -f "$KEY_FILE" ] && [ -x "$(cat "$KEY_FILE")" ]; then
+	GODOT_BIN="$(cat "$KEY_FILE")"
+elif [ -x "/Users/boyu/Desktop/Godot.app/Contents/MacOS/Godot" ]; then
+	GODOT_BIN="/Users/boyu/Desktop/Godot.app/Contents/MacOS/Godot"
+else
+	GODOT_BIN="$(command -v godot || command -v godot4)"
+fi
+
+if [ -z "$GODOT_BIN" ]; then
+	osascript -e 'display alert "找不到 Godot" message "请把 Godot 放到 /Users/boyu/Desktop/Godot.app，或设置 GODOT 环境变量。"'
+	exit 1
+fi
+
+cd "$APP_DIR" || exit 1
+
+# Finder 会塞一个 -psn_xxx 参数给 app，Godot 不认，过滤掉
+FILTERED=""
+for a in "$@"; do
+	case "$a" in
+		-psn_*) ;;
+		*) FILTERED="$FILTERED \"$a\"" ;;
+	esac
+done
+eval "exec \"\$GODOT_BIN\" --path \"\$APP_DIR\" $FILTERED"
