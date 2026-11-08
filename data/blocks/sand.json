@@ -1,0 +1,13 @@
+{
+  "id": 4,
+  "name": "sand",
+  "display_name": "沙子",
+  "color": [
+    219,
+    207,
+    163
+  ],
+  "solid": true,
+  "opaque": true,
+  "hardness": 0.5
+}

@@ -1,0 +1,13 @@
+{
+  "id": 8,
+  "name": "planks",
+  "display_name": "木板",
+  "color": [
+    178,
+    140,
+    88
+  ],
+  "solid": true,
+  "opaque": true,
+  "hardness": 0.8
+}

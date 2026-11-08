@@ -1,0 +1,13 @@
+{
+  "id": 7,
+  "name": "bedrock",
+  "display_name": "基岩",
+  "color": [
+    56,
+    56,
+    60
+  ],
+  "solid": true,
+  "opaque": true,
+  "hardness": 999.0
+}

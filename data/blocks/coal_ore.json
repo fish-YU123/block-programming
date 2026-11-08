@@ -1,0 +1,14 @@
+{
+  "id": 5,
+  "name": "coal_ore",
+  "display_name": "煤矿",
+  "color": [
+    80,
+    80,
+    84
+  ],
+  "solid": true,
+  "opaque": true,
+  "hardness": 2.0,
+  "drop": "coal"
+}

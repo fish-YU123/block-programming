@@ -1,0 +1,14 @@
+{
+  "id": 6,
+  "name": "copper_ore",
+  "display_name": "铜矿",
+  "color": [
+    184,
+    115,
+    72
+  ],
+  "solid": true,
+  "opaque": true,
+  "hardness": 2.0,
+  "drop": "copper"
+}

@@ -1,0 +1,94 @@
+extends RefCounted
+## 地形生成：噪声高度场 + 分层 + 矿石散布。有限地图，尺寸由世界设定。
+
+const BlockDB = preload("res://scripts/world/block_db.gd")
+
+const BASE_HEIGHT := 26
+const HILL_AMP := 6.0
+const DETAIL_AMP := 1.0
+
+var _db: BlockDB
+var _continent := FastNoiseLite.new()
+var _hills := FastNoiseLite.new()
+var _detail := FastNoiseLite.new()
+
+var id_air := 0
+var id_grass := 1
+var id_dirt := 2
+var id_stone := 3
+var id_sand := 4
+var id_coal := 5
+var id_copper := 6
+var id_bedrock := 7
+
+var _height_cache := {}
+
+
+func setup(db: BlockDB, world_seed: int) -> void:
+	_db = db
+	id_air = db.id_of("air")
+	id_grass = db.id_of("grass")
+	id_dirt = db.id_of("dirt")
+	id_stone = db.id_of("stone")
+	id_sand = db.id_of("sand")
+	id_coal = db.id_of("coal_ore")
+	id_copper = db.id_of("copper_ore")
+	id_bedrock = db.id_of("bedrock")
+	_continent.seed = world_seed
+	_continent.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_continent.frequency = 0.006
+	_continent.fractal_octaves = 3
+	_hills.seed = world_seed + 17
+	_hills.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_hills.frequency = 0.035
+	_hills.fractal_octaves = 3
+	_detail.seed = world_seed + 43
+	_detail.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_detail.frequency = 0.09
+	_height_cache.clear()
+
+
+## 地表高度（方块坐标，返回该列最高实心方块所在 y）
+func height_at(x: int, z: int) -> int:
+	var key := Vector2i(x, z)
+	var cached = _height_cache.get(key, null)
+	if cached != null:
+		return cached
+	var c := _continent.get_noise_2d(float(x), float(z))
+	var hills := _hills.get_noise_2d(float(x), float(z)) * HILL_AMP
+	var detail := _detail.get_noise_2d(float(x), float(z)) * DETAIL_AMP
+	var h := int(round(float(BASE_HEIGHT) + c * 10.0 + hills + detail))
+	var value := clampi(h, 3, 60)
+	_height_cache[key] = value
+	return value
+
+
+func base_block(x: int, y: int, z: int) -> int:
+	return block_at_height(x, y, z, height_at(x, z))
+
+
+## 已算出该列高度 h 时的方块（避免重复查高度缓存）
+func block_at_height(x: int, y: int, z: int, h: int) -> int:
+	if y > h:
+		return id_air
+	if y <= 0:
+		return id_bedrock
+	if y == h:
+		return id_sand if h <= 20 else id_grass
+	if y >= h - 3:
+		return id_dirt
+	if y == h - 4 and h <= 20:
+		return id_sand
+	var roll := _hash01(x, y, z)
+	if roll < 0.018:
+		return id_coal
+	if y <= h - 6 and roll < 0.032:
+		return id_copper
+	return id_stone
+
+
+func _hash01(x: int, y: int, z: int) -> float:
+	var h: int = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791)
+	h = (h ^ (h >> 13)) * 1274126177
+	h = h ^ (h >> 16)
+	return float(h & 0xFFFF) / 65535.0

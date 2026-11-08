@@ -1,0 +1,13 @@
+{
+  "id": 2,
+  "name": "dirt",
+  "display_name": "泥土",
+  "color": [
+    134,
+    96,
+    67
+  ],
+  "solid": true,
+  "opaque": true,
+  "hardness": 0.5
+}

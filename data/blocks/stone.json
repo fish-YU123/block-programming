@@ -1,0 +1,13 @@
+{
+  "id": 3,
+  "name": "stone",
+  "display_name": "石头",
+  "color": [
+    128,
+    128,
+    130
+  ],
+  "solid": true,
+  "opaque": true,
+  "hardness": 1.5
+}

@@ -1,0 +1,78 @@
+extends Node3D
+## 自由飞行相机：鼠标看方向，WASD 移动，空格/Shift 升降，滚轮调速度。
+
+@onready var camera: Camera3D = $Camera3D
+
+var yaw := 0.0
+var pitch := -0.25
+var move_speed := 14.0
+var fast_multiplier := 3.0
+var mouse_sensitivity := 0.0025
+var mouse_captured := false
+
+const MIN_SPEED := 1.0
+const MAX_SPEED := 60.0
+
+
+func _ready() -> void:
+	capture_mouse()
+
+
+func capture_mouse() -> void:
+	mouse_captured = true
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func release_mouse() -> void:
+	mouse_captured = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		if not mouse_captured:
+			capture_mouse()
+			get_viewport().set_input_as_handled()
+			return
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			move_speed = clampf(move_speed * 1.15, MIN_SPEED, MAX_SPEED)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			move_speed = clampf(move_speed / 1.15, MIN_SPEED, MAX_SPEED)
+	elif event is InputEventMouseMotion and mouse_captured:
+		yaw -= event.relative.x * mouse_sensitivity
+		pitch = clampf(pitch - event.relative.y * mouse_sensitivity, -1.55, 1.55)
+	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		if mouse_captured:
+			release_mouse()
+		else:
+			get_tree().quit()
+		get_viewport().set_input_as_handled()
+
+
+func _process(delta: float) -> void:
+	rotation = Vector3(pitch, yaw, 0.0)
+	if not mouse_captured:
+		return
+	var dir := Vector3.ZERO
+	var basis := Basis.from_euler(Vector3(0.0, yaw, 0.0))
+	if Input.is_key_pressed(KEY_W):
+		dir -= basis.z
+	if Input.is_key_pressed(KEY_S):
+		dir += basis.z
+	if Input.is_key_pressed(KEY_A):
+		dir -= basis.x
+	if Input.is_key_pressed(KEY_D):
+		dir += basis.x
+	if Input.is_key_pressed(KEY_SPACE) or Input.is_key_pressed(KEY_E):
+		dir += Vector3.UP
+	if Input.is_key_pressed(KEY_SHIFT):
+		dir += Vector3.DOWN
+	var speed := move_speed
+	if Input.is_key_pressed(KEY_CTRL):
+		speed *= fast_multiplier
+	if dir.length_squared() > 0.0:
+		position += dir.normalized() * speed * delta
+
+
+func look_direction() -> Vector3:
+	return -camera.global_basis.z

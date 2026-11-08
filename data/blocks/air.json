@@ -1,0 +1,13 @@
+{
+  "id": 0,
+  "name": "air",
+  "display_name": "空气",
+  "color": [
+    0,
+    0,
+    0
+  ],
+  "solid": false,
+  "opaque": false,
+  "hardness": 0.0
+}

@@ -1,0 +1,18 @@
+{
+  "id": 1,
+  "name": "grass",
+  "display_name": "草方块",
+  "color": [
+    96,
+    166,
+    62
+  ],
+  "solid": true,
+  "opaque": true,
+  "hardness": 0.6,
+  "top_color": [
+    110,
+    180,
+    70
+  ]
+}
