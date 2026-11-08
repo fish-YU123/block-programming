@@ -17,8 +17,15 @@ var logs: Array = []
 
 var enemies: Array = []
 var orders: Array = []
+## 建筑接口（由 main 注入）：func(id: String, cell: Vector3i) -> String / func(id: String) -> String
+var build_provider: Callable = Callable()
+var build_here_provider: Callable = Callable()
 ## 开局发育时间剩余秒数（>0 时双方不能攻击）
 var peace_left := 0.0
+## 全队资源（字典，由 main 每帧喂进来）
+var resources: Dictionary = {}
+## 是不是队伍里的"指挥官"（只有它会主动盖建筑，避免每个单位都乱花资源）
+var is_leader := false
 
 var _vm: PyVM
 ## 一"段"代码执行期间的列表类传感器快照（敌方/标记/雷达），
@@ -93,6 +100,10 @@ func _nearest_ore(blocks3: Array, cell: Dictionary) -> Dictionary:
 						"dist": d,
 					}
 	return best
+
+
+func set_resources(value: Dictionary) -> void:
+	resources = value
 
 
 func set_peace(seconds: float) -> void:
@@ -206,6 +217,14 @@ func _apply_idle_controls() -> void:
 func _wire_path_provider() -> void:
 	_vm.path_provider = func(target: Vector3) -> Array:
 		return unit.find_path_to(target)
+	_vm.build_provider = func(def_id: String, cell: Vector3i) -> String:
+		if build_provider.is_valid():
+			return str(build_provider.call(def_id, cell))
+		return "没有建筑接口"
+	_vm.build_here_provider = func(def_id: String) -> String:
+		if build_here_provider.is_valid():
+			return str(build_here_provider.call(def_id))
+		return "没有建筑接口"
 
 
 func _inject_sensors(refresh_lists: bool) -> void:
@@ -246,4 +265,6 @@ func _inject_sensors(refresh_lists: bool) -> void:
 		"below": _list_snapshot.get("below", {}),
 		"moving": unit.moving,
 		"peace": peace_left,
+		"res": resources,
+		"leader": 1 if is_leader else 0,
 	})

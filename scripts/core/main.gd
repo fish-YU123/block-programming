@@ -57,7 +57,7 @@ const MAX_BUILDINGS := 12
 const UNIT_COLLISION_MASK := 2
 const DOUBLE_CLICK_MS := 400
 ## 开局资源（还没做采集经济闭环前的启动资金）
-const STARTING_RESOURCES := {"copper": 120, "coal": 60, "iron": 40, "gold": 10}
+const STARTING_RESOURCES := {"copper": 200, "coal": 200, "iron": 40, "gold": 10}
 ## 队伍
 const TEAM_BLUE := 0
 const TEAM_RED := 1
@@ -80,12 +80,14 @@ var units_root: Node3D
 var buildings_root: Node3D
 ## 预设单位 + 玩家代码（现在还没有编辑器，先用默认代码）
 const MAX_UNITS := 20
-const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.FIGHTER_SOURCE}]
+const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.BLUE_SOURCE}]
 
 ## 玩家标记的施工/挖掘指令（虚影）：{x, y, z, action, id}
 ## action：mine 挖一格 / place 放方块 / build 造建筑 / remove 拆建筑
 var orders: Array = []
 var orders_root: Node3D
+## 采矿机只挖这些产出（其他的方块跳过，免得白挖）
+const MINER_DROPS := ["coal", "copper", "iron", "gold"]
 const ORDER_MINE := "mine"
 const ORDER_PLACE := "place"
 const ORDER_BUILD := "build"
@@ -335,6 +337,11 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 	# 蓝方面朝 +X、红方面朝 -X
 	unit.rotation.y = -PI * 0.5 if team == TEAM_BLUE else PI * 0.5
 	var controller := UnitController.new()
+	controller.is_leader = team == TEAM_BLUE and team_units(TEAM_BLUE).is_empty()
+	controller.build_provider = func(def_id: String, cell: Vector3i) -> String:
+		return place_building_at(def_id, cell, team)
+	controller.build_here_provider = func(def_id: String) -> String:
+		return build_near(def_id, unit.global_position, team)
 	unit.gun_fired.connect(_on_gun_fired)
 	unit.block_dug.connect(_on_block_dug)
 	controller.bind(unit, code, 1)
@@ -342,6 +349,37 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 	_next_uid += 1
 	unit.name = "%s_%d" % [str(def.get("id", "unit")), int(units[units.size() - 1]["uid"])]
 
+
+## 在自己附近找一块平地盖建筑（给单位代码的 build_here 用）
+func build_near(def_id: String, near: Vector3, team: int) -> String:
+	if building_db == null or not building_db.has(def_id):
+		return "没有这种建筑：%s" % def_id
+	var size: Vector3i = building_db.size_of(def_id)
+	var base := Vector3i(floori(near.x), floori(near.y), floori(near.z))
+	# 从近到远找一个「地面平坦、上方全空」的位置
+	for radius in range(0, 13):
+		for dx in range(-radius, radius + 1):
+			for dz in range(-radius, radius + 1):
+				if maxi(absi(dx), absi(dz)) != radius:
+					continue
+				var x: int = base.x + dx
+				var z: int = base.z + dz
+				if x < 2 or z < 2 or x + size.x >= world.size_x - 1 or z + size.z >= world.size_z - 1:
+					continue
+				var top := world.surface_height(x, z)
+				var flat := true
+				for ox in size.x:
+					for oz in size.z:
+						if world.surface_height(x + ox, z + oz) != top:
+							flat = false
+				if not flat:
+					continue
+				var cell := Vector3i(x, top, z)
+				var err := place_building_at(def_id, cell, team)
+				if err == "":
+					return ""
+				# 位置被占就继续往远处找
+	return "附近找不到平地"
 
 func _cost_text(cost: Dictionary) -> String:
 	var parts: PackedStringArray = []
@@ -513,6 +551,8 @@ func _physics_process(delta: float) -> void:
 		if self_unit.alive:
 			controller.set_orders(orders_for(self_unit.global_position))
 			controller.set_peace(peace_left)
+			if economy != null:
+				controller.set_resources(economy.all())
 		controller.tick(delta)
 	# 武器：发育时间里也能挖方块（只对单位断伤）；贴身钻头战斗只在开打后结算
 	_process_weapons(delta)
@@ -1003,23 +1043,37 @@ func _tick_buildings(delta: float) -> void:
 
 
 func _mine_with(node, def: Dictionary) -> void:
-	var center: Vector3i = node.center_cell()
+	# 在建筑的占地范围里往下找：只挖「能出资源」的方块（矿石/木板/草），
+	# 泥土石头跳过不挖，这样一条竖井不会白挖，出矿率也高
+	var base: Vector3i = node.base_cell
+	var size: Vector3i = node.size
 	var depth := int(def.get("mine_depth", 10))
-	for i in depth:
-		var cell := Vector3i(center.x, center.y - 1 - i, center.z)
-		if not world.in_bounds(cell):
-			return
-		var block_id := world.get_block(cell)
-		if block_id == BlockDB.AIR:
-			continue
-		if block_id == db.id_of("bedrock"):
-			return
-		var drop := economy.mine_block(block_id)
-		world.set_block(cell, BlockDB.AIR)
-		node.produced += 1
-		if drop != "":
-			hud.show_message("采矿机挖到 %s" % drop)
-		return
+	var bedrock := db.id_of("bedrock")
+	for dx in size.x:
+		for dz in size.z:
+			var x: int = base.x + dx
+			var z: int = base.z + dz
+			if not world.in_bounds(Vector3i(x, 1, z)):
+				continue
+			var top := world.surface_height(x, z)
+			for i in depth:
+				var cell := Vector3i(x, top - 1 - i, z)
+				if not world.in_bounds(cell):
+					break
+				var block_id := world.get_block(cell)
+				if block_id == BlockDB.AIR:
+					continue
+				if block_id == bedrock:
+					break
+				# 只挖值钱的矿（煤/铜/铁/金），泥土石头这类不掉资源的跳过
+				if not MINER_DROPS.has(economy.drop_of(block_id)):
+					continue
+				var drop := economy.mine_block(block_id)
+				world.set_block(cell, BlockDB.AIR)
+				node.produced += 1
+				if drop != "":
+					hud.show_message("采矿机挖到 %s" % drop)
+				return
 
 
 ## 充电站：给半径内同队伍的单位补电
@@ -1058,9 +1112,14 @@ func _produce_unit(node) -> void:
 		return
 	economy.spend(cost)
 	var point: Vector3 = node.spawn_point()
-	_spawn_unit(unit_def, point, DefaultCode.FLYER_SOURCE, int(node.team))
+	_spawn_unit(unit_def, point, _preset_code_for(int(node.team)), int(node.team))
 	node.produced += 1
 	hud.show_message("组装厂下线一台 %s" % str(unit_def.get("display_name", unit_id)))
+
+
+## 各队伍的预设代码：蓝方是"指挥官"AI（造建筑 + 滚雪球），红方是简单的战斗 AI
+func _preset_code_for(team: int) -> String:
+	return DefaultCode.BLUE_SOURCE if team == TEAM_BLUE else DefaultCode.FIGHTER_SOURCE
 
 
 func team_units(team: int) -> Array:
@@ -1428,7 +1487,7 @@ func _place_unit() -> void:
 	at.z = clampf(at.z, 1.0, float(world.size_z) - 2.0)
 	var ground := world.surface_height(floori(at.x), floori(at.z))
 	economy.spend(cost)
-	var code: String = DefaultCode.ROVER_SOURCE if str(def.get("id", "")) == "rover" else DefaultCode.FLYER_SOURCE
+	var code: String = DefaultCode.ROVER_SOURCE if str(def.get("id", "")) == "rover" else _preset_code_for(TEAM_BLUE)
 	_spawn_unit(def, Vector3(at.x, float(ground), at.z), code)
 	hud.show_message("放下%s（共 %d 台）" % [str(def.get("display_name", "单位")), units.size()])
 	_refresh_hud()

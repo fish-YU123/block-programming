@@ -25,8 +25,8 @@ func _process(_delta: float) -> bool:
 
 func _check() -> void:
 	var economy = _main.economy
-	_record("开局有铜", economy.amount("copper") == 120, str(economy.amount("copper")))
-	_record("开局有煤", economy.amount("coal") == 60, str(economy.amount("coal")))
+	_record("开局有铜", economy.amount("copper") == 200, str(economy.amount("copper")))
+	_record("开局有煤", economy.amount("coal") == 200, str(economy.amount("coal")))
 
 	# 直接挖一块煤矿（不靠鼠标），验证资源真的进账
 	var world = _main.world

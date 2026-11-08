@@ -16,6 +16,7 @@ const MAX_REPEAT := 1000000
 const BUILTINS := [
 	"print", "set_drive", "set_spin", "set_steer", "set_thrust", "get_link",
 	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot", "go_to", "stop", "find_path", "set_velocity", "set_altitude",
+	"build", "build_here",
 	"range", "len", "abs", "min", "max", "int", "float", "str", "round", "bool",
 ]
 
@@ -32,6 +33,9 @@ var globals: Dictionary = {}
 var state: Dictionary = {"drive": 0.0, "spin": {}, "steer": {}, "thrust": {}, "mem": {}, "controls": DEFAULT_CONTROLS.duplicate()}
 ## 由控制器塞进来：给 find_path(x,y,z) 用，返回 Array[Vector3]
 var path_provider: Callable = Callable()
+## 建筑：build(id, x, y, z) 与 build_here(id)，返回错误字符串（空串表示成功）
+var build_provider: Callable = Callable()
+var build_here_provider: Callable = Callable()
 var logs: Array = []
 var error := ""
 var finished := false
@@ -469,6 +473,10 @@ func _type_name(value) -> String:
 				return str((value as Dictionary)["__type"])
 			return "dict"
 	return "object"
+
+
+func _is_str(value) -> bool:
+	return value is String
 
 
 func _is_num(value) -> bool:
@@ -953,6 +961,22 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			state["controls"]["alt_mode"] = true
 			state["controls"]["alt_target"] = float(args[0])
 			stack.append(null)
+			return true
+		"build":
+			if args.size() != 4 or not _is_str(args[0]) or not _is_num(args[1]) or not _is_num(args[2]) or not _is_num(args[3]):
+				return _fail("TypeError", "build(id, x, y, z)：在指定格子盖一栋建筑", op, ins)
+			var err := ""
+			if build_provider.is_valid():
+				err = str(build_provider.call(str(args[0]), Vector3i(int(args[1]), int(args[2]), int(args[3]))))
+			stack.append(err)
+			return true
+		"build_here":
+			if args.size() != 1 or not _is_str(args[0]):
+				return _fail("TypeError", "build_here(id)：在自己旁边找块平地把建筑盖起来", op, ins)
+			var err2 := ""
+			if build_here_provider.is_valid():
+				err2 = str(build_here_provider.call(str(args[0])))
+			stack.append(err2)
 			return true
 		"find_path":
 			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
