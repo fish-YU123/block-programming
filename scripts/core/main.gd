@@ -532,10 +532,15 @@ func _remove_last_unit() -> void:
 func _update_unit_hud() -> void:
 	if hud == null or units.is_empty():
 		return
-	var entry: Dictionary = units[units.size() - 1]
+	var mine: Array = team_units(TEAM_BLUE)
+	if mine.is_empty():
+		hud.set_info("你的单位全部被击毁\n按 R 重开")
+		hud.set_resources(_resources_text())
+		return
+	var entry: Dictionary = mine[mine.size() - 1]
 	var flyer: Flyer = entry["unit"]
 	var controller: UnitController = entry["controller"]
-	var text := "单位 %d 台 ｜ %s  高度 %.1f 米  电量 %.0f%%" % [units.size(), flyer.display_name, flyer.global_position.y - float(world.surface_height(floori(flyer.global_position.x), floori(flyer.global_position.z))), flyer.energy_j / flyer.energy_max * 100.0]
+	var text := "我方单位 %d 台 ｜ %s  高度 %.1f 米  电量 %.0f%%" % [mine.size(), flyer.display_name, flyer.global_position.y - float(world.surface_height(floori(flyer.global_position.x), floori(flyer.global_position.z))), flyer.energy_j / flyer.energy_max * 100.0]
 	if controller.halted():
 		text += "\n代码出错：%s" % controller.last_error()
 	hud.set_info(text + "\nC 打开代码面板")
