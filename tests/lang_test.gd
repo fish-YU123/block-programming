@@ -24,6 +24,7 @@ func _initialize() -> void:
 	_test_bad_call()
 	_test_controls()
 	_test_compare_ops()
+	_test_start_loop()
 	print("通过 %d 项，失败 %d 项" % [_passed, _failed])
 	for item in _failures:
 		print("  ✗ " + str(item))
@@ -126,6 +127,45 @@ func _test_sensors() -> void:
 func _test_bad_call() -> void:
 	var run := _run("set_drive(\"x\")\n")
 	_expect_contains("参数类型", (run["vm"] as VM).error, "TypeError")
+
+
+func _test_start_loop() -> void:
+	# 有 start / loop 时：模块段先跑完 → start 跑一次 → loop 反复跑
+	var vm := VM.new()
+	vm.load_source("print(\"模块\")\n\ndef start():\n    mem[\"n\"] = 0\n    print(\"开始\")\n\ndef loop():\n    mem[\"n\"] += 1\n    print(\"第\", mem[\"n\"])\n")
+	_record("识别 start 函数", vm.has_function("start"), "")
+	_record("识别 loop 函数", vm.has_function("loop"), "")
+	_record("识别不到不存在的函数", not vm.has_function("nope"), "")
+	_record("有参函数不算框架回调", not vm.has_function("print"), "")
+
+	var logs: Array = []
+	var _step_until_done := func() -> void:
+		for i in 400:
+			vm.inject({})
+			var result := vm.step(1)
+			for line in result["logs"]:
+				logs.append(str(line))
+			if vm.error != "" or vm.finished:
+				return
+	_step_until_done.call()
+	_expect_eq("模块段先执行", str(logs[0]) if not logs.is_empty() else "", "模块")
+
+	# 模块跑完后调用 start
+	_record("模块跑完能调 start", vm.call_function("start"), "")
+	_step_until_done.call()
+	var has_start_log := false
+	for line in logs:
+		if str(line) == "开始":
+			has_start_log = true
+	_record("start 执行了", has_start_log, str(logs))
+
+	# loop 反复调用
+	_record("能调 loop", vm.call_function("loop"), "")
+	_step_until_done.call()
+	_record("loop 能改 mem", int(vm.state["mem"].get("n", -1)) == 1, str(vm.state["mem"]))
+	_record("loop 能再调一次", vm.call_function("loop"), "")
+	_step_until_done.call()
+	_record("loop 第二次 mem 继续涨", int(vm.state["mem"].get("n", -1)) == 2, str(vm.state["mem"]))
 
 
 func _test_compare_ops() -> void:

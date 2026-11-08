@@ -1,24 +1,33 @@
 extends RefCounted
 ## 预设单位的默认玩家代码（新建单位、示例按钮都用它）
+##
+## 每个单位支持两个固定函数：
+##   def start():  开局（或点「应用」）时跑一次
+##   def loop():   之后一直反复跑
+## 两个都不写的话，整段代码会从头循环执行（老写法仍然有效）。
 
-const FLYER_SOURCE := """# 飞飞：自动悬停
-# 传感器：pos / vel / energy / yaw / blocks[5][5] / heights[5][5] / here / enemies
-# 控制：set_lift(0~1) set_tilt(前后, 左右) set_rcs(转向, 前后) drill(开关)
-目标高度 = heights[2][2] + 8
+const FLYER_SOURCE := """# 飞飞：起飞悬停
+# 传感器：pos vel cell yaw energy thrust blocks[5][5] heights[5][5] here enemies
+# 控制：set_lift(0~1) set_tilt(前后, 左右) set_rcs(转向, 前后) drill(True/False)
 
-while True:
-    # 高度：按误差和垂直速度调升力
+def start():
+    print("飞飞启动，地面高度 ", heights[2][2])
+
+def loop():
+    # 先算目标：地表上方 8 米
+    目标高度 = heights[2][2] + 8
     误差 = 目标高度 - pos.y
+    # 高了少推、低了多推，再减去上升速度做阻尼
     set_lift(0.57 + 误差 * 0.15 - vel.y * 0.1)
-    # 位置：用 RCS / 矢量喷口抵消漂移，悬停在原地
-    set_rcs(0, -vel.z * 0.6)
+    # 前后/左右也做一点阻尼，别被风吹跑
     set_tilt(0, -vel.x * 0.4)
+    set_rcs(0, -vel.z * 0.6)
     drill(False)
 """
 
-## 红方无人机：追最近的敌方单位（连高度一起追），贴上去开钻
+## 红方无人机：追最近的敌方单位，贴上去开钻
 const RED_SOURCE := """# 红方无人机（脚本 AI）
-while True:
+def loop():
     目标高度 = heights[2][2] + 8
     期望速度 = 0.0
     距离 = 999.0

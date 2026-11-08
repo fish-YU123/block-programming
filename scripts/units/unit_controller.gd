@@ -19,6 +19,7 @@ var enemies: Array = []
 
 var _vm: PyVM
 var _budget := 0.0
+var _started := false
 var _halted := false
 var _last_error := ""
 
@@ -75,7 +76,7 @@ func tick(delta: float) -> void:
 			while logs.size() > MAX_LOGS:
 				logs.pop_front()
 		if bool(result.get("done", false)):
-			_vm.restart()
+			_advance()
 	if _halted:
 		_apply_idle_controls()
 		unit.runtime_error = _last_error
@@ -91,6 +92,22 @@ func tick(delta: float) -> void:
 	}
 	unit.runtime_error = ""
 	unit.runtime_logs = logs
+
+
+## 跑完一段后决定下一段跑什么：先 start（只跑一次），之后反复跑 loop；
+## 两个函数都没写就回到老行为：整段代码从头再跑一遍（mem 保留）。
+func _advance() -> void:
+	if _vm.error != "":
+		return
+	if not _started and _vm.has_function("start"):
+		_started = true
+		if _vm.call_function("start"):
+			return
+	_started = true
+	if _vm.has_function("loop"):
+		if _vm.call_function("loop"):
+			return
+	_vm.restart()
 
 
 func _apply_idle_controls() -> void:

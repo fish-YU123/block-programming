@@ -93,6 +93,32 @@ func set_parts(rows: Array) -> void:
 
 
 ## 程序跑完后自动重跑（保留 mem），行为与旧 Python 版一致。
+## 源码里是否定义了某个无参函数（用于 start / loop 这种框架回调）
+func has_function(fname: String) -> bool:
+	return _find_function(fname) >= 0
+
+
+func _find_function(fname: String) -> int:
+	for i in _funcs.size():
+		if str(_funcs[i].get("name", "")) == fname:
+			return i
+	return -1
+
+
+## 直接调用一个无参函数（start / loop）；有参数或不存在则返回 false
+func call_function(fname: String) -> bool:
+	var index := _find_function(fname)
+	if index < 0:
+		return false
+	var chunk: Dictionary = _funcs[index]
+	if not Array(chunk.get("params", [])).is_empty():
+		return false
+	error = ""
+	finished = false
+	_frames = [_new_frame(chunk)]
+	return true
+
+
 func restart() -> void:
 	if _main.is_empty():
 		return

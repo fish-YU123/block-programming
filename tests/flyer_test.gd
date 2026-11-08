@@ -110,6 +110,24 @@ func _finish() -> void:
 	_unit._physics_process(0.016)
 	_record("没电时升力失效", _unit.thrust_now == 0.0, str(_unit.thrust_now))
 
+	# 6) start / loop 两段式代码
+	var UnitController = preload("res://scripts/units/unit_controller.gd")
+	var ctrl = UnitController.new()
+	var flyer2 = load("res://scripts/units/flyer.gd").new()
+	root.add_child(flyer2)
+	var udb = load("res://scripts/units/unit_db.gd").new()
+	udb.load_dir("res://data/units")
+	flyer2.setup(_world, udb.get_def("feifei"))
+	ctrl.bind(flyer2, "def start():\n    mem[\"n\"] = 0\n    mem[\"started\"] = 1\n\ndef loop():\n    mem[\"n\"] = mem[\"n\"] + 1\n    set_lift(0.5)\n", 1)
+	for i in 200:
+		flyer2._physics_process(0.016)
+		ctrl.tick(0.05)
+	var state: Dictionary = ctrl._vm.state
+	_record("start 只跑一次", int(state["mem"].get("started", 0)) == 1, str(state["mem"]))
+	_record("loop 反复跑", int(state["mem"].get("n", 0)) >= 2, str(state["mem"]))
+	_record("loop 里的控制量生效", is_equal_approx(float(flyer2.controls["lift"]), 0.5), str(flyer2.controls))
+	flyer2.queue_free()
+
 	print("通过 %d 项，失败 %d 项" % [_passed, _failed])
 	for item in _failures:
 		print("  ✗ " + item)

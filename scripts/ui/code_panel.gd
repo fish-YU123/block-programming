@@ -220,10 +220,20 @@ func _build() -> void:
 
 	hint_label = Label.new()
 	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint_label.text = "传感器：pos vel cell yaw energy blocks[5][5] heights[5][5] here enemies\n控制：set_lift() set_tilt() set_rcs() drill() ｜ 每秒 60 行"
+	hint_label.text = "结构：def start() 跑一次 → def loop() 反复跑（每秒共 60 行）\n控制：set_lift() set_tilt() set_rcs() drill()\n传感器：pos vel cell yaw energy blocks[5][5] heights[5][5] here enemies"
 	hint_label.add_theme_font_size_override("font_size", 11)
 	hint_label.add_theme_color_override("font_color", Color(0.62, 0.68, 0.76))
 	column.add_child(hint_label)
+
+
+## 点到代码以外的地方就交出键盘焦点，避免在别处点击后还在往代码里打字
+func _input(event: InputEvent) -> void:
+	if not visible or editor == null:
+		return
+	if not (event is InputEventMouseButton) or not event.pressed:
+		return
+	if not editor.get_global_rect().has_point(event.position):
+		editor.release_focus()
 
 
 func _select_in_list() -> void:
