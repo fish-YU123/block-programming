@@ -65,15 +65,13 @@ func zone_of(x: int) -> int:
 	return 2
 
 
-## 中立区：平坦灰色平台
+## 中立区：地形照常生成，只是整块换成灰色
 func is_neutral(x: int) -> bool:
 	return x >= ZONE_A_END and x < ZONE_B_START
 
 
 ## 地表高度（方块坐标，返回该列最高实心方块所在 y）
 func height_at(x: int, z: int) -> int:
-	if is_neutral(x):
-		return int(NEUTRAL_HEIGHT)
 	var key := Vector2i(x, z)
 	var cached = _height_cache.get(key, null)
 	if cached != null:

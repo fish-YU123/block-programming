@@ -38,6 +38,8 @@ var _bedrock_id := 7
 const BOUNDARY_A_COLOR := Color(0.28, 0.45, 0.95)
 const BOUNDARY_B_COLOR := Color(0.9, 0.22, 0.2)
 const BOUNDARY_THICKNESS := 1
+const CURTAIN_HEIGHT := 1.6
+const CURTAIN_ALPHA := 1.0
 
 ## 每个方向的明暗系数（经典体素游戏的烘焙面光照）
 const FACE_SHADE := [0.80, 0.80, 1.0, 0.50, 0.66, 0.66]
@@ -77,11 +79,67 @@ func setup(block_db: BlockDB, world_seed: int, sx: int, sz: int, sy: int) -> voi
 	_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_bedrock_id = db.id_of("bedrock")
+	_build_boundary_curtains()
 	_colors_top.resize(db.defs.size())
 	_colors_side.resize(db.defs.size())
 	for def in db.defs:
 		_colors_top[def.id] = def.face_color(true)
 		_colors_side[def.id] = def.face_color(false)
+
+
+## 中立区两侧的分界：贴着地表起伏的一条发光色带
+func _build_boundary_curtains() -> void:
+	var holder := Node3D.new()
+	holder.name = "Boundaries"
+	add_child(holder)
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.vertex_color_use_as_albedo = true
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.disable_receive_shadows = true
+	for spec in [[TerrainGen.ZONE_A_END, BOUNDARY_A_COLOR], [TerrainGen.ZONE_B_START, BOUNDARY_B_COLOR]]:
+		var px: float = float(spec[0])
+		var col: Color = spec[1]
+		var verts := PackedVector3Array()
+		var colors := PackedColorArray()
+		var indices := PackedInt32Array()
+		for z in size_z:
+			var h := float(terrain.height_at(int(px), z)) + 1.0
+			var z0 := float(z)
+			var z1 := float(z + 1)
+			var lin := col.srgb_to_linear()
+			var i := verts.size()
+			verts.append(Vector3(px, h, z0))
+			verts.append(Vector3(px, h, z1))
+			verts.append(Vector3(px, h + CURTAIN_HEIGHT, z1))
+			verts.append(Vector3(px, h + CURTAIN_HEIGHT, z0))
+			colors.append(Color(lin.r, lin.g, lin.b, CURTAIN_ALPHA))
+			colors.append(Color(lin.r, lin.g, lin.b, CURTAIN_ALPHA))
+			colors.append(Color(lin.r, lin.g, lin.b, 0.9))
+			colors.append(Color(lin.r, lin.g, lin.b, 0.9))
+			indices.append_array([i, i + 1, i + 2, i, i + 2, i + 3])
+		var mesh := ArrayMesh.new()
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = verts
+		arrays[Mesh.ARRAY_COLOR] = colors
+		arrays[Mesh.ARRAY_INDEX] = indices
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		var mi := MeshInstance3D.new()
+		mi.mesh = mesh
+		mi.material_override = mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		holder.add_child(mi)
+
+
+## 边界线下的一圈地表颜色（不在边上返回透明）
+func _line_color_at(gx: int) -> Color:
+	if gx == TerrainGen.ZONE_A_END - 1:
+		return BOUNDARY_A_COLOR
+	if gx == TerrainGen.ZONE_B_START:
+		return BOUNDARY_B_COLOR
+	return Color(0, 0, 0, 0)
 
 
 func in_bounds(cell: Vector3i) -> bool:
@@ -340,6 +398,11 @@ func _rebuild(chunk: Chunk) -> void:
 							color = BOUNDARY_A_COLOR
 						elif plane_x == TerrainGen.ZONE_B_START:
 							color = BOUNDARY_B_COLOR
+					else:
+						# 边界线上的一圈地表染成队色
+						var line_color = _line_color_at(gx)
+						if line_color.a > 0.0:
+							color = line_color
 					color = color.srgb_to_linear() * float(FACE_SHADE[f])
 					var base_index := verts.size()
 					var corners: Array = FACE_CORNERS[f]
