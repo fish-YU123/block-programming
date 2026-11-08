@@ -57,6 +57,13 @@ func current_uid() -> int:
 
 
 ## 键盘焦点是否在代码框里（在别处点击后就为 false）
+## 鼠标是不是压在面板上（用来屏蔽滚轮调视野）
+func mouse_over() -> bool:
+	if root_control == null or not visible:
+		return false
+	return root_control.get_global_rect().has_point(get_viewport().get_mouse_position())
+
+
 func editor_has_focus() -> bool:
 	return editor != null and editor.has_focus()
 

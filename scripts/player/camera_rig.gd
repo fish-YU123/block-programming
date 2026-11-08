@@ -26,6 +26,10 @@ const FOV_STEP := 3.0
 
 var _pressing := false
 var _press_pos := Vector2.ZERO
+## 拖动时把鼠标藏起来（捕获模式），松手后回到原来的位置
+var _saved_mouse := Vector2.ZERO
+## 鼠标压在 UI 面板上时置 true：滚轮不再调视野
+var wheel_blocked := false
 
 
 func _ready() -> void:
@@ -46,20 +50,29 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			zoom(-1.0)
+			if not wheel_blocked:
+				zoom(-1.0)
 			return
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			zoom(1.0)
+			if not wheel_blocked:
+				zoom(1.0)
 			return
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
 				_pressing = true
 				dragging = false
 				_press_pos = event.position
+				_saved_mouse = event.position
+				# 拖动期间藏起鼠标并锁在窗口里，这样怎么拖都不会甩到屏幕外
+				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 			elif _pressing:
 				_pressing = false
+				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 				if not dragging:
-					primary_click.emit(_press_pos)
+					primary_click.emit(_saved_mouse)
+				else:
+					# 转完视角把鼠标送回按下时的位置
+					Input.warp_mouse(_saved_mouse)
 				dragging = false
 		return
 	if event is InputEventMouseMotion and _pressing:
@@ -98,6 +111,8 @@ func _process(delta: float) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_MOUSE_EXIT:
+		if _pressing:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		_pressing = false
 		dragging = false
 

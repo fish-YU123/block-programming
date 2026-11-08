@@ -132,6 +132,13 @@ func setup(world_node: Node3D, def: Dictionary) -> void:
 
 # ---------------------------------------------------------------- 物理
 
+## 算一条从当前位置到目标的航路（给玩家代码里的 find_path 用）
+func find_path_to(target: Vector3) -> Array:
+	if world == null:
+		return [target]
+	return PathFinder.find_path(world, global_position, target)
+
+
 ## 让单位自动飞到某个点：内部用 A* 算航路，然后自己压着航路飞
 func request_go(target: Vector3) -> void:
 	if has_goal and target.distance_to(_goal) < 1.2:
@@ -172,18 +179,39 @@ func _autopilot() -> void:
 	if horiz.length() > 0.25:
 		var speed: float = clampf(horiz.length() * 1.4, 1.0, PATH_MAX_SPEED)
 		v_des = horiz.normalized() * speed
+	_steer_toward(v_des)
+	controls["lift"] = _lift_for(wp.y)
+	controls["turn"] = 0.0
+	controls["forward"] = 0.0
+
+
+## 把"想达到的水平速度"换算成倾角（每物理帧调用，所以没有代码刷新延迟）
+func _steer_toward(v_des: Vector3) -> void:
 	var dv := v_des - Vector3(linear_velocity.x, 0.0, linear_velocity.z)
 	var acc := dv.limit_length(1.0)
 	var local := global_transform.basis.inverse() * acc
 	controls["roll"] = clampf(asin(clampf(local.x, -1.0, 1.0)) / gimbal_rad, -1.0, 1.0)
 	controls["pitch"] = clampf(asin(clampf(-local.z, -1.0, 1.0)) / gimbal_rad, -1.0, 1.0)
-	controls["lift"] = clampf(0.57 + (wp.y - global_position.y) * 0.16 - linear_velocity.y * 0.12, 0.0, 1.0)
-	controls["turn"] = 0.0
-	controls["forward"] = 0.0
+
+
+## 高度保持用的升力
+func _lift_for(target_y: float) -> float:
+	return clampf(0.585 + (target_y - global_position.y) * 0.2 - linear_velocity.y * 0.12, 0.0, 1.0)
+
+
+## 玩家代码用 set_velocity / set_altitude 下指令时，每帧在这里闭环
+func _command_control() -> void:
+	if has_goal:
+		return  # 自动驾驶优先
+	if bool(controls.get("vel_mode", false)):
+		_steer_toward(Vector3(float(controls.get("vx", 0.0)), 0.0, float(controls.get("vz", 0.0))))
+	if bool(controls.get("alt_mode", false)):
+		controls["lift"] = _lift_for(float(controls.get("alt_target", global_position.y)))
 
 
 func _physics_process(delta: float) -> void:
 	_autopilot()
+	_command_control()
 
 	var lift := clampf(float(controls.get("lift", 0.0)), 0.0, 1.0)
 	var pitch := clampf(float(controls.get("pitch", 0.0)), -1.0, 1.0)

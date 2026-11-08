@@ -34,6 +34,7 @@ func bind(unit_node: Node3D, code: String, code_revision: int) -> void:
 	_last_error = ""
 	logs = []
 	_vm = PyVM.new()
+	_wire_path_provider()
 	_vm.load_source(source)
 	if _vm.finished and _vm.error != "":
 		_halted = true
@@ -103,6 +104,11 @@ func tick(delta: float) -> void:
 		"shoot_x": float(controls.get("shoot_x", 0.0)),
 		"shoot_y": float(controls.get("shoot_y", 0.0)),
 		"shoot_z": float(controls.get("shoot_z", 0.0)),
+		"vel_mode": bool(controls.get("vel_mode", false)),
+		"vx": float(controls.get("vx", 0.0)),
+		"vz": float(controls.get("vz", 0.0)),
+		"alt_mode": bool(controls.get("alt_mode", false)),
+		"alt_target": float(controls.get("alt_target", 0.0)),
 	}
 	# 自动驾驶指令：go_to(x,y,z) / stop()
 	var go := bool(controls.get("go", false))
@@ -142,6 +148,11 @@ func _apply_idle_controls() -> void:
 	}
 	unit.clear_go()
 	unit.runtime_logs = logs
+
+
+func _wire_path_provider() -> void:
+	_vm.path_provider = func(target: Vector3) -> Array:
+		return unit.find_path_to(target)
 
 
 func _inject_sensors() -> void:

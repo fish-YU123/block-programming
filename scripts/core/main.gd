@@ -49,6 +49,8 @@ const TEAM_RED := 1
 ## 红方脚本单位（M5 先放 3 台当对手）
 const RED_START := [{"x": 226.0, "z": 108.0}, {"x": 232.0, "z": 128.0}, {"x": 226.0, "z": 150.0}]
 ## 激光钻头打单位：每秒伤害 / 有效距离
+## 鼠标射线能够多远
+const AIM_RANGE := 40.0
 const DRILL_DAMAGE_PER_SEC := 45.0
 const DRILL_UNIT_RANGE := 3.2
 ## 每项：{uid, unit, controller, code, revision, team, cost}
@@ -229,6 +231,12 @@ func _code_typing() -> bool:
 
 
 ## 每帧同步：不在打字就恢复 WASD/挖掘等操作
+func _sync_wheel_state() -> void:
+	if rig == null:
+		return
+	rig.wheel_blocked = code_panel != null and code_panel.is_open() and code_panel.mouse_over()
+
+
 func _sync_input_state() -> void:
 	if rig == null:
 		return
@@ -918,6 +926,7 @@ func _process(_delta: float) -> void:
 	if world == null or rig == null:
 		return
 	_sync_input_state()
+	_sync_wheel_state()
 	world.update_streaming(rig.position)
 	_update_highlight()
 	_update_unit_hud()
@@ -959,11 +968,19 @@ func _build_wire_box(scale: Vector3) -> void:
 	_highlight_array.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
 
 
+## 鼠标指哪打哪：从鼠标位置往场景里发射线
 func _aim() -> Dictionary:
 	if rig == null or world == null:
 		return {}
-	var from := rig.camera.global_position
-	var to := from + rig.look_direction() * REACH
+	var screen := get_viewport().get_mouse_position()
+	return _aim_at(screen)
+
+
+func _aim_at(screen: Vector2) -> Dictionary:
+	if rig == null or world == null:
+		return {}
+	var from := rig.camera.project_ray_origin(screen)
+	var to := from + rig.camera.project_ray_normal(screen) * AIM_RANGE
 	return world.raycast(from, to)
 
 
@@ -1035,7 +1052,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventMouseButton) or not event.pressed:
 		return
 	if event.button_index == MOUSE_BUTTON_RIGHT and rig != null and not _code_typing():
-		var hit := _aim()
+		var hit := _aim_at(event.position)
 		if hit.is_empty():
 			return
 		var cell: Vector3i = hit["cell"] + hit["normal"]

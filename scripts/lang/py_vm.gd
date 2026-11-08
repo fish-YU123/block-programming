@@ -15,7 +15,7 @@ const MAX_REPEAT := 1000000
 
 const BUILTINS := [
 	"print", "set_drive", "set_spin", "set_steer", "set_thrust", "get_link",
-	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot", "go_to", "stop",
+	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot", "go_to", "stop", "find_path", "set_velocity", "set_altitude",
 	"range", "len", "abs", "min", "max", "int", "float", "str", "round", "bool",
 ]
 
@@ -24,10 +24,14 @@ const DEFAULT_CONTROLS := {
 	"laser": false, "laser_x": 0.0, "laser_y": 0.0, "laser_z": 0.0,
 	"shoot": false, "shoot_x": 0.0, "shoot_y": 0.0, "shoot_z": 0.0,
 	"go": false, "go_x": 0.0, "go_y": 0.0, "go_z": 0.0,
+	"vel_mode": false, "vx": 0.0, "vz": 0.0,
+	"alt_mode": false, "alt_target": 0.0,
 }
 
 var globals: Dictionary = {}
 var state: Dictionary = {"drive": 0.0, "spin": {}, "steer": {}, "thrust": {}, "mem": {}, "controls": DEFAULT_CONTROLS.duplicate()}
+## 由控制器塞进来：给 find_path(x,y,z) 用，返回 Array[Vector3]
+var path_provider: Callable = Callable()
 var logs: Array = []
 var error := ""
 var finished := false
@@ -934,6 +938,31 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 				return _fail("TypeError", "stop() 不接受参数", op, ins)
 			state["controls"]["go"] = false
 			stack.append(null)
+			return true
+		"set_velocity":
+			if args.size() != 2 or not _is_num(args[0]) or not _is_num(args[1]):
+				return _fail("TypeError", "set_velocity(水平x速度, 水平z速度)：米/秒", op, ins)
+			state["controls"]["vel_mode"] = true
+			state["controls"]["vx"] = float(args[0])
+			state["controls"]["vz"] = float(args[1])
+			stack.append(null)
+			return true
+		"set_altitude":
+			if args.size() != 1 or not _is_num(args[0]):
+				return _fail("TypeError", "set_altitude(y)：想稳定的世界高度", op, ins)
+			state["controls"]["alt_mode"] = true
+			state["controls"]["alt_target"] = float(args[0])
+			stack.append(null)
+			return true
+		"find_path":
+			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
+				return _fail("TypeError", "find_path(x, y, z)：算出到这个世界坐标的航路", op, ins)
+			var waypoints: Array = []
+			if path_provider.is_valid():
+				var pts: Array = path_provider.call(Vector3(float(args[0]), float(args[1]), float(args[2])))
+				for point in pts:
+					waypoints.append({"x": float(point.x), "y": float(point.y), "z": float(point.z)})
+			stack.append(waypoints)
 			return true
 		"get_link":
 			if args.size() != 1 or not _is_num(args[0]):
