@@ -1,0 +1,13 @@
+{
+  "id": 9,
+  "name": "neutral",
+  "display_name": "中立地",
+  "color": [
+    118,
+    122,
+    128
+  ],
+  "solid": true,
+  "opaque": true,
+  "hardness": 999.0
+}

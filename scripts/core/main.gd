@@ -6,8 +6,8 @@ const VoxelWorld = preload("res://scripts/world/voxel_world.gd")
 const CameraRig = preload("res://scripts/player/camera_rig.gd")
 const Hud = preload("res://scripts/ui/hud.gd")
 
-const WORLD_SIZE_X := 128
-const WORLD_SIZE_Z := 128
+const WORLD_SIZE_X := 256
+const WORLD_SIZE_Z := 256
 const WORLD_HEIGHT := 64
 const WORLD_SEED := 20261108
 const REACH := 8.0
@@ -32,7 +32,7 @@ func _ready() -> void:
 		push_error(problem)
 		return
 	for def in db.defs:
-		if def.id != BlockDB.AIR:
+		if def.id != BlockDB.AIR and def.name != "neutral":
 			block_options.append(def.id)
 	selected = 0
 
@@ -53,11 +53,11 @@ func _ready() -> void:
 	add_child(rig)
 	rig.primary_click.connect(_on_primary_click)
 
-	var mid := Vector3(WORLD_SIZE_X * 0.5, 0, WORLD_SIZE_Z * 0.5)
-	var h := world.surface_height(int(mid.x), int(mid.z))
-	rig.position = Vector3(mid.x, float(h) + 18.0, mid.z)
-	rig.yaw = 0.6
-	world.build_all()
+	var spawn := Vector3(30.0, 0.0, WORLD_SIZE_Z * 0.5)
+	var h := world.surface_height(int(spawn.x), int(spawn.z))
+	rig.position = Vector3(spawn.x, float(h) + 16.0, spawn.z)
+	rig.yaw = -1.5708
+	world.prefetch(rig.position, 2)
 
 	hud = Hud.new()
 	hud.name = "Hud"
@@ -91,8 +91,8 @@ func _install_environment() -> void:
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_DEPTH
 	env.fog_light_color = Color(0.72, 0.82, 0.92)
-	env.fog_depth_begin = 60.0
-	env.fog_depth_end = 170.0
+	env.fog_depth_begin = 50.0
+	env.fog_depth_end = 130.0
 	env.fog_depth_curve = 1.4
 	env.fog_density = 1.0
 	env.fog_sky_affect = 0.0
@@ -168,6 +168,9 @@ func _on_primary_click() -> void:
 	var cell: Vector3i = hit["cell"]
 	if world.get_block(cell) == BlockDB.AIR:
 		return
+	if not world.is_buildable(cell):
+		hud.show_message("中立区不能建造或破坏")
+		return
 	world.set_block(cell, BlockDB.AIR)
 
 
@@ -191,6 +194,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		var place_at := Vector3(cell) + Vector3(0.5, 0.5, 0.5)
 		if place_at.distance_to(rig.camera.global_position) < 0.9:
+			return
+		if not world.is_buildable(cell):
+			hud.show_message("中立区不能建造或破坏")
 			return
 		world.set_block(cell, block_options[selected])
 

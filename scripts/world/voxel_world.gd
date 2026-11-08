@@ -34,6 +34,11 @@ var _colors_side := PackedColorArray()
 var edited_chunks := {}
 var _bedrock_id := 7
 
+## 分界线颜色（画在中立区两侧的断面面上）
+const BOUNDARY_A_COLOR := Color(0.28, 0.45, 0.95)
+const BOUNDARY_B_COLOR := Color(0.9, 0.22, 0.2)
+const BOUNDARY_THICKNESS := 1
+
 ## 每个方向的明暗系数（经典体素游戏的烘焙面光照）
 const FACE_SHADE := [0.80, 0.80, 1.0, 0.50, 0.66, 0.66]
 
@@ -169,6 +174,18 @@ func update_streaming(focus: Vector3) -> void:
 		budget -= 1
 		if Time.get_ticks_usec() >= deadline:
 			break
+
+
+## 快速预建以 center 为中心、半径 radius 个区块的范围（启动时用）
+func prefetch(center: Vector3, radius: int) -> void:
+	var fc := Vector2i(floori(center.x / float(CHUNK)), floori(center.z / float(CHUNK)))
+	for dz in range(-radius, radius + 1):
+		for dx in range(-radius, radius + 1):
+			var c := fc + Vector2i(dx, dz)
+			if c.x < 0 or c.y < 0 or c.x >= chunk_count_x() or c.y >= chunk_count_z():
+				continue
+			if not chunks.has(c):
+				_build(c)
 
 
 ## 同步构建所有区块（测试/小地图用）
@@ -317,6 +334,12 @@ func _rebuild(chunk: Chunk) -> void:
 					if nb != BlockDB.AIR and db.is_opaque(nb):
 						continue
 					var color: Color = _colors_top[block_id] if dir.y > 0 else _colors_side[block_id]
+					if dir.x != 0:
+						var plane_x := gx + 1 if dir.x > 0 else gx
+						if plane_x == TerrainGen.ZONE_A_END:
+							color = BOUNDARY_A_COLOR
+						elif plane_x == TerrainGen.ZONE_B_START:
+							color = BOUNDARY_B_COLOR
 					color = color.srgb_to_linear() * float(FACE_SHADE[f])
 					var base_index := verts.size()
 					var corners: Array = FACE_CORNERS[f]
@@ -349,6 +372,11 @@ func _rebuild(chunk: Chunk) -> void:
 	chunk.mesh_instance.mesh = mesh
 	chunk.shape.set_faces(faces)
 	chunk.built = true
+
+
+## 该格是否允许玩家建造/破坏（中立区禁止）
+func is_buildable(cell: Vector3i) -> bool:
+	return not terrain.is_neutral(cell.x)
 
 
 ## 射线检测：返回 {cell, normal, point}，未命中返回空字典

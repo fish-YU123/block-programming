@@ -4,6 +4,12 @@ extends RefCounted
 const BlockDB = preload("res://scripts/world/block_db.gd")
 
 const BASE_HEIGHT := 26
+
+## 地图分带：蓝队 [0, zone_a_end)，中立区 [zone_a_end, zone_b_start)，红队 [zone_b_start, 世界宽)
+const MAP_WIDTH := 256
+const ZONE_A_END := 100
+const ZONE_B_START := 156
+const NEUTRAL_HEIGHT := 16.0
 const HILL_AMP := 6.0
 const DETAIL_AMP := 1.0
 
@@ -20,6 +26,7 @@ var id_sand := 4
 var id_coal := 5
 var id_copper := 6
 var id_bedrock := 7
+var id_neutral := 9
 
 var _height_cache := {}
 
@@ -34,6 +41,7 @@ func setup(db: BlockDB, world_seed: int) -> void:
 	id_coal = db.id_of("coal_ore")
 	id_copper = db.id_of("copper_ore")
 	id_bedrock = db.id_of("bedrock")
+	id_neutral = db.id_of("neutral")
 	_continent.seed = world_seed
 	_continent.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	_continent.frequency = 0.006
@@ -48,8 +56,24 @@ func setup(db: BlockDB, world_seed: int) -> void:
 	_height_cache.clear()
 
 
+## 0 = 蓝队区，1 = 中立区，2 = 红队区
+func zone_of(x: int) -> int:
+	if x < ZONE_A_END:
+		return 0
+	if x < ZONE_B_START:
+		return 1
+	return 2
+
+
+## 中立区：平坦灰色平台
+func is_neutral(x: int) -> bool:
+	return x >= ZONE_A_END and x < ZONE_B_START
+
+
 ## 地表高度（方块坐标，返回该列最高实心方块所在 y）
 func height_at(x: int, z: int) -> int:
+	if is_neutral(x):
+		return int(NEUTRAL_HEIGHT)
 	var key := Vector2i(x, z)
 	var cached = _height_cache.get(key, null)
 	if cached != null:
@@ -73,6 +97,8 @@ func block_at_height(x: int, y: int, z: int, h: int) -> int:
 		return id_air
 	if y <= 0:
 		return id_bedrock
+	if is_neutral(x):
+		return id_neutral
 	if y == h:
 		return id_sand if h <= 20 else id_grass
 	if y >= h - 3:
