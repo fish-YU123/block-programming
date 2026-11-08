@@ -28,7 +28,7 @@ var edits := {}
 
 var _material: StandardMaterial3D
 var _focus := Vector3.ZERO
-var _view_chunks := 6
+var _view_chunks := 20
 var _colors_top := PackedColorArray()
 var _colors_side := PackedColorArray()
 var edited_chunks := {}

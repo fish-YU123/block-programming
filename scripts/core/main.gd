@@ -57,7 +57,7 @@ func _ready() -> void:
 	var h := world.surface_height(int(spawn.x), int(spawn.z))
 	rig.position = Vector3(spawn.x, float(h) + 16.0, spawn.z)
 	rig.yaw = -1.5708
-	world.prefetch(rig.position, 2)
+	world.prefetch(rig.position, 20)
 
 	hud = Hud.new()
 	hud.name = "Hud"
@@ -91,8 +91,8 @@ func _install_environment() -> void:
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_DEPTH
 	env.fog_light_color = Color(0.72, 0.82, 0.92)
-	env.fog_depth_begin = 50.0
-	env.fog_depth_end = 130.0
+	env.fog_depth_begin = 150.0
+	env.fog_depth_end = 340.0
 	env.fog_depth_curve = 1.4
 	env.fog_density = 1.0
 	env.fog_sky_affect = 0.0
