@@ -231,6 +231,15 @@ func _code_typing() -> bool:
 
 
 ## 每帧同步：不在打字就恢复 WASD/挖掘等操作
+func _update_debug_hud() -> void:
+	if hud == null or rig == null or not hud.debug_label.visible:
+		return
+	hud.set_debug("鼠标模式 %d ｜ 按下 %s ｜ 拖动 %s ｜ yaw %.2f ｜ 输入 %s ｜ FOV %.0f" % [
+		Input.mouse_mode, str(rig._pressing), str(rig.dragging), rig.yaw,
+		str(rig.input_enabled), rig.fov
+	])
+
+
 func _sync_wheel_state() -> void:
 	if rig == null:
 		return
@@ -926,6 +935,7 @@ func _process(_delta: float) -> void:
 	if world == null or rig == null:
 		return
 	_sync_input_state()
+	_update_debug_hud()
 	_sync_wheel_state()
 	world.update_streaming(rig.position)
 	_update_highlight()

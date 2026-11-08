@@ -6,6 +6,8 @@ var hint_label: Label
 var block_label: Label
 var crosshair: Control
 var message_label: Label
+## F3 调试信息（F3 开关）
+var debug_label: Label
 var resources_label: Label
 var overlay_label: Label
 var _message_timer := 0.0
@@ -66,6 +68,13 @@ func _ready() -> void:
 	message_label.position = Vector2(-200, 120)
 	message_label.add_theme_color_override("font_color", Color(1, 0.85, 0.4))
 	add_child(message_label)
+
+	debug_label = Label.new()
+	debug_label.position = Vector2(16, 108)
+	debug_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.4))
+	debug_label.add_theme_font_size_override("font_size", 13)
+	debug_label.visible = false
+	add_child(debug_label)
 
 
 func show_message(text: String, seconds := 2.0) -> void:

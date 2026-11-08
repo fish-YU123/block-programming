@@ -24,6 +24,12 @@ const FOV_MIN := 35.0
 const FOV_MAX := 100.0
 const FOV_STEP := 3.0
 
+## 拖动时把鼠标藏起来（HIDDEN 模式：光标不可见但仍会移动），
+## 光标快贴到窗口边缘时把它挪回中心，避免转到屏幕边缘就转不动；
+## 松手后回到按下时的位置。
+var _warp_target := Vector2.ZERO
+var _awaiting_warp := false
+
 var _pressing := false
 var _press_pos := Vector2.ZERO
 ## 拖动位移累计（捕获鼠标后 event.position 不再变化，只能用 relative 累加判断是否算"拖动"）
@@ -66,8 +72,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				_press_pos = event.position
 				_saved_mouse = event.position
 				_drag_amount = 0.0
-				# 拖动期间藏起鼠标并锁在窗口里，这样怎么拖都不会甩到屏幕外
-				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+				_awaiting_warp = false
+				# 拖动期间把光标藏起来（不捕获，避免某些平台上捕获后收不到相对位移）
+				Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
 			elif _pressing:
 				_pressing = false
 				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -79,6 +86,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				dragging = false
 		return
 	if event is InputEventMouseMotion and _pressing:
+		# 光标被 warp 回中心时系统会补发一个事件，跳过它，免得视角跳一下
+		if _awaiting_warp and event.position.distance_to(_warp_target) < 1.0:
+			_awaiting_warp = false
+			return
 		_drag_amount += absf(event.relative.x) + absf(event.relative.y)
 		if not dragging and _drag_amount > DRAG_THRESHOLD:
 			dragging = true
@@ -86,6 +97,14 @@ func _unhandled_input(event: InputEvent) -> void:
 			yaw -= event.relative.x * mouse_sensitivity
 			pitch = clampf(pitch - event.relative.y * mouse_sensitivity, -1.55, 1.55)
 			look_changed.emit()
+			# 光标贴边就挪回窗口中心，这样能一直往同方向转
+			var vp := get_viewport().get_visible_rect().size
+			var edge := 24.0
+			if event.position.x < edge or event.position.y < edge \
+					or event.position.x > vp.x - edge or event.position.y > vp.y - edge:
+				_warp_target = vp * 0.5
+				_awaiting_warp = true
+				Input.warp_mouse(_warp_target)
 
 
 func _process(delta: float) -> void:
