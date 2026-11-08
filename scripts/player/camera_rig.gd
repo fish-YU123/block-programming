@@ -26,6 +26,8 @@ const FOV_STEP := 3.0
 
 var _pressing := false
 var _press_pos := Vector2.ZERO
+## 拖动位移累计（捕获鼠标后 event.position 不再变化，只能用 relative 累加判断是否算"拖动"）
+var _drag_amount := 0.0
 ## 拖动时把鼠标藏起来（捕获模式），松手后回到原来的位置
 var _saved_mouse := Vector2.ZERO
 ## 鼠标压在 UI 面板上时置 true：滚轮不再调视野
@@ -63,6 +65,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				dragging = false
 				_press_pos = event.position
 				_saved_mouse = event.position
+				_drag_amount = 0.0
 				# 拖动期间藏起鼠标并锁在窗口里，这样怎么拖都不会甩到屏幕外
 				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 			elif _pressing:
@@ -76,7 +79,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				dragging = false
 		return
 	if event is InputEventMouseMotion and _pressing:
-		if not dragging and event.position.distance_to(_press_pos) > DRAG_THRESHOLD:
+		_drag_amount += absf(event.relative.x) + absf(event.relative.y)
+		if not dragging and _drag_amount > DRAG_THRESHOLD:
 			dragging = true
 		if dragging:
 			yaw -= event.relative.x * mouse_sensitivity
