@@ -3,6 +3,7 @@ extends Node3D
 
 const BlockDB = preload("res://scripts/world/block_db.gd")
 const TerrainGen = preload("res://scripts/world/terrain_gen.gd")
+const TextureAtlas = preload("res://scripts/world/texture_atlas.gd")
 
 const CHUNK := 16
 const MAX_CHUNK_BUILDS_PER_FRAME := 3
@@ -27,10 +28,19 @@ var pending: Array[Vector2i] = []
 var edits := {}
 
 var _material: StandardMaterial3D
+var atlas: TextureAtlas
 var _focus := Vector3.ZERO
 var _view_chunks := 20
-var _colors_top := PackedColorArray()
-var _colors_side := PackedColorArray()
+## 每个方块顶/底/侧面的图集 UV 矩形（setup 时按方块 id 缓存）
+var _uv_top: Array[Rect2] = []
+var _uv_bottom: Array[Rect2] = []
+var _uv_side: Array[Rect2] = []
+## AO 邻居偏移缓存：_ao_offsets[面][角] = 3 个邻居的 buffer 字节偏移
+var _ao_offsets: Array = []
+## 同上的 y 偏移，用来判断是否越出当前区块的 y 范围
+var _ao_dys: Array = []
+## 方块 id -> 是否实心（AO 采样用，避免每像素查字典）
+var _solid_ids := PackedByteArray()
 var edited_chunks := {}
 var _bedrock_id := 7
 var _line_nodes := [null, null]
@@ -66,6 +76,34 @@ const FACE_CORNERS := [
 	[Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(1, 1, 0), Vector3(0, 1, 0)],
 ]
 
+## 每个面的 4 个角在贴图里的 UV（0..1，y 向下），保证从外侧看图案是正的
+const FACE_UV_CORNERS := [
+	[Vector2(1, 1), Vector2(0, 1), Vector2(0, 0), Vector2(1, 0)],
+	[Vector2(0, 1), Vector2(1, 1), Vector2(1, 0), Vector2(0, 0)],
+	[Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)],
+	[Vector2(0, 1), Vector2(1, 1), Vector2(1, 0), Vector2(0, 0)],
+	[Vector2(1, 1), Vector2(0, 1), Vector2(0, 0), Vector2(1, 0)],
+	[Vector2(1, 1), Vector2(0, 1), Vector2(0, 0), Vector2(1, 0)],
+]
+
+## 每个面除法线外的两条切线轴（0=x, 1=y, 2=z），用来找 AO 邻居
+const FACE_TANGENTS := [
+	[1, 2], [1, 2], [0, 2], [0, 2], [0, 1], [0, 1],
+]
+
+## 每个面的 4 个角在两条切线轴上的方向（-1 或 +1）
+const FACE_AO_SIGNS := [
+	[[-1, -1], [-1, 1], [1, 1], [1, -1]],
+	[[-1, 1], [-1, -1], [1, -1], [1, 1]],
+	[[-1, -1], [1, -1], [1, 1], [-1, 1]],
+	[[-1, 1], [1, 1], [1, -1], [-1, -1]],
+	[[1, -1], [-1, -1], [-1, 1], [1, 1]],
+	[[-1, -1], [1, -1], [1, 1], [-1, 1]],
+]
+
+## 顶点 AO 的 4 级明暗：下标 = 遮挡的邻居数（0 个最亮，3 个最暗）
+const AO_LEVELS := [1.0, 0.87, 0.74, 0.62]
+
 
 func setup(block_db: BlockDB, world_seed: int, sx: int, sz: int, sy: int) -> void:
 	db = block_db
@@ -74,20 +112,76 @@ func setup(block_db: BlockDB, world_seed: int, sx: int, sz: int, sy: int) -> voi
 	size_y = sy
 	terrain = TerrainGen.new()
 	terrain.setup(db, world_seed)
+	# 程序生成的像素贴图：所有像素都在运行时画出来，不依赖外部图片素材
+	atlas = TextureAtlas.new()
+	atlas.build(db)
 	_material = StandardMaterial3D.new()
 	_material.vertex_color_use_as_albedo = true
+	_material.albedo_texture = atlas.texture
+	# 像素风：最近邻采样 + 不重复（UV 都落在图集内部的格子里）
+	_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	_material.texture_repeat = false
 	_material.roughness = 1.0
 	_material.metallic = 0.0
 	_material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
 	_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_bedrock_id = db.id_of("bedrock")
-	_build_boundaries()
-	_colors_top.resize(db.defs.size())
-	_colors_side.resize(db.defs.size())
+	_build_ao_tables()
+	_solid_ids.resize(256)
 	for def in db.defs:
-		_colors_top[def.id] = def.face_color(true)
-		_colors_side[def.id] = def.face_color(false)
+		if def.solid and def.id >= 0 and def.id < 256:
+			_solid_ids[def.id] = 1
+	# 每种方块顶/底/侧面的 UV 只查一次图集，生成网格时直接按 id 取
+	_uv_top.resize(db.defs.size())
+	_uv_bottom.resize(db.defs.size())
+	_uv_side.resize(db.defs.size())
+	for def in db.defs:
+		if def.id < 0 or def.id >= db.defs.size():
+			continue
+		_uv_top[def.id] = atlas.uv_rect(def.id, TextureAtlas.FACE_TOP)
+		_uv_bottom[def.id] = atlas.uv_rect(def.id, TextureAtlas.FACE_BOTTOM)
+		_uv_side[def.id] = atlas.uv_rect(def.id, TextureAtlas.FACE_SIDE)
+	_build_boundaries()
+
+
+## 预计算每个面 4 个角的 AO 邻居偏移（单位：格，换算成 buffer 字节偏移）
+## 每个角看 3 个邻居：两个侧邻居 + 一个对角邻居，经典体素 AO。
+func _build_ao_tables() -> void:
+	var w := CHUNK + 2
+	var w2 := w * w
+	_ao_offsets.resize(6)
+	_ao_dys.resize(6)
+	for f in 6:
+		var dir: Vector3i = FACE_DIRS[f]
+		var axis_a: int = FACE_TANGENTS[f][0]
+		var axis_b: int = FACE_TANGENTS[f][1]
+		var face_offsets := []
+		var face_dys := []
+		for k in 4:
+			var signs: Array = FACE_AO_SIGNS[f][k]
+			var ta := _axis_unit(axis_a, signs[0])
+			var tb := _axis_unit(axis_b, signs[1])
+			var neighbors := [dir + ta, dir + tb, dir + ta + tb]
+			var deltas := PackedInt32Array()
+			var dys := PackedInt32Array()
+			for o: Vector3i in neighbors:
+				deltas.append(o.y * w2 + o.z * w + o.x)
+				dys.append(o.y)
+			face_offsets.append(deltas)
+			face_dys.append(dys)
+		_ao_offsets[f] = face_offsets
+		_ao_dys[f] = face_dys
+
+
+func _axis_unit(axis: int, sign: int) -> Vector3i:
+	match axis:
+		0:
+			return Vector3i(sign, 0, 0)
+		1:
+			return Vector3i(0, sign, 0)
+		_:
+			return Vector3i(0, 0, sign)
 
 
 ## 中立区两侧的分界：贴地的一条细线（俯视见线，平视见竖条），改方块后自动重铺
@@ -414,6 +508,7 @@ func _rebuild(chunk: Chunk) -> void:
 	var verts := PackedVector3Array()
 	var normals := PackedVector3Array()
 	var colors := PackedColorArray()
+	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
 	var faces := PackedVector3Array()
 	for lx in CHUNK:
@@ -442,14 +537,48 @@ func _rebuild(chunk: Chunk) -> void:
 						nb = buf[base + dir.y * w2 + dir.z * w + dir.x]
 					if nb != BlockDB.AIR and db.is_opaque(nb):
 						continue
-					var color: Color = _colors_top[block_id] if dir.y > 0 else _colors_side[block_id]
-					color = color.srgb_to_linear() * float(FACE_SHADE[f])
+					# 贴图里已经带方块基色，顶点色只乘面明暗 + AO
+					var uv_rect: Rect2
+					if dir.y > 0:
+						uv_rect = _uv_top[block_id]
+					elif dir.y < 0:
+						uv_rect = _uv_bottom[block_id]
+					else:
+						uv_rect = _uv_side[block_id]
 					var base_index := verts.size()
 					var corners: Array = FACE_CORNERS[f]
-					for corner in corners:
+					var uv_corners: Array = FACE_UV_CORNERS[f]
+					var ao_offsets: Array = _ao_offsets[f]
+					var ao_dys: Array = _ao_dys[f]
+					var face_shade := float(FACE_SHADE[f])
+					for k in 4:
+						var corner: Vector3 = corners[k]
+						# 经典体素 AO：看这个角在面外侧那层的两个侧邻居 + 对角邻居
+						var deltas: PackedInt32Array = ao_offsets[k]
+						var dys: PackedInt32Array = ao_dys[k]
+						var sa := 0
+						var oy := y + dys[0]
+						if oy >= lo and oy <= hi:
+							sa = _solid_ids[buf[base + deltas[0]]]
+						var sb := 0
+						oy = y + dys[1]
+						if oy >= lo and oy <= hi:
+							sb = _solid_ids[buf[base + deltas[1]]]
+						var sc := 0
+						oy = y + dys[2]
+						if oy >= lo and oy <= hi:
+							sc = _solid_ids[buf[base + deltas[2]]]
+						var ao_level := sa + sb + sc
+						if sa != 0 and sb != 0:
+							ao_level = 3  # 两个侧邻居都挡住时角落最暗
+						var shade := face_shade * float(AO_LEVELS[ao_level])
 						verts.append(cell_pos + corner)
 						normals.append(Vector3(dir))
-						colors.append(color)
+						colors.append(Color(shade, shade, shade))
+						var uvc: Vector2 = uv_corners[k]
+						uvs.append(Vector2(
+							uv_rect.position.x + uvc.x * uv_rect.size.x,
+							uv_rect.position.y + uvc.y * uv_rect.size.y))
 					indices.append(base_index)
 					indices.append(base_index + 1)
 					indices.append(base_index + 2)
@@ -467,6 +596,7 @@ func _rebuild(chunk: Chunk) -> void:
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_NORMAL] = normals
 	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
 	arrays[Mesh.ARRAY_INDEX] = indices
 	var mesh := ArrayMesh.new()
 	if verts.size() > 0:
