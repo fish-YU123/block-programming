@@ -33,13 +33,15 @@ var _colors_top := PackedColorArray()
 var _colors_side := PackedColorArray()
 var edited_chunks := {}
 var _bedrock_id := 7
+var _line_nodes := [null, null]
+var _line_dirty := [false, false]
 
-## 分界线颜色（画在中立区两侧的断面面上）
+## 分界线颜色（贴地的一条细线，方块变动后自动重铺）
 const BOUNDARY_A_COLOR := Color(0.28, 0.45, 0.95)
 const BOUNDARY_B_COLOR := Color(0.9, 0.22, 0.2)
-const BOUNDARY_THICKNESS := 1
-const CURTAIN_HEIGHT := 1.6
-const CURTAIN_ALPHA := 1.0
+const LINE_HALF_WIDTH := 0.08
+const LINE_LIFT := 0.02
+const LINE_HEIGHT := 0.55
 
 ## 每个方向的明暗系数（经典体素游戏的烘焙面光照）
 const FACE_SHADE := [0.80, 0.80, 1.0, 0.50, 0.66, 0.66]
@@ -79,7 +81,7 @@ func setup(block_db: BlockDB, world_seed: int, sx: int, sz: int, sy: int) -> voi
 	_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_bedrock_id = db.id_of("bedrock")
-	_build_boundary_curtains()
+	_build_boundaries()
 	_colors_top.resize(db.defs.size())
 	_colors_side.resize(db.defs.size())
 	for def in db.defs:
@@ -87,59 +89,105 @@ func setup(block_db: BlockDB, world_seed: int, sx: int, sz: int, sy: int) -> voi
 		_colors_side[def.id] = def.face_color(false)
 
 
-## 中立区两侧的分界：贴着地表起伏的一条发光色带
-func _build_boundary_curtains() -> void:
+## 中立区两侧的分界：贴地的一条细线（俯视见线，平视见竖条），改方块后自动重铺
+func _build_boundaries() -> void:
 	var holder := Node3D.new()
 	holder.name = "Boundaries"
 	add_child(holder)
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.vertex_color_use_as_albedo = true
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.disable_receive_shadows = true
-	for spec in [[TerrainGen.ZONE_A_END, BOUNDARY_A_COLOR], [TerrainGen.ZONE_B_START, BOUNDARY_B_COLOR]]:
-		var px: float = float(spec[0])
-		var col: Color = spec[1]
-		var verts := PackedVector3Array()
-		var colors := PackedColorArray()
-		var indices := PackedInt32Array()
-		for z in size_z:
-			var h := float(terrain.height_at(int(px), z)) + 1.0
-			var z0 := float(z)
-			var z1 := float(z + 1)
-			var lin := col.srgb_to_linear()
-			var i := verts.size()
-			verts.append(Vector3(px, h, z0))
-			verts.append(Vector3(px, h, z1))
-			verts.append(Vector3(px, h + CURTAIN_HEIGHT, z1))
-			verts.append(Vector3(px, h + CURTAIN_HEIGHT, z0))
-			colors.append(Color(lin.r, lin.g, lin.b, CURTAIN_ALPHA))
-			colors.append(Color(lin.r, lin.g, lin.b, CURTAIN_ALPHA))
-			colors.append(Color(lin.r, lin.g, lin.b, 0.9))
-			colors.append(Color(lin.r, lin.g, lin.b, 0.9))
-			indices.append_array([i, i + 1, i + 2, i, i + 2, i + 3])
-		var mesh := ArrayMesh.new()
-		var arrays := []
-		arrays.resize(Mesh.ARRAY_MAX)
-		arrays[Mesh.ARRAY_VERTEX] = verts
-		arrays[Mesh.ARRAY_COLOR] = colors
-		arrays[Mesh.ARRAY_INDEX] = indices
-		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	for i in 2:
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.vertex_color_use_as_albedo = true
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mat.disable_receive_shadows = true
 		var mi := MeshInstance3D.new()
-		mi.mesh = mesh
+		mi.mesh = ArrayMesh.new()
 		mi.material_override = mat
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		holder.add_child(mi)
+		_line_nodes[i] = mi
+		_rebuild_boundary_line(i)
 
 
-## 边界线下的一圈地表颜色（不在边上返回透明）
-func _line_color_at(gx: int) -> Color:
-	if gx == TerrainGen.ZONE_A_END - 1:
-		return BOUNDARY_A_COLOR
-	if gx == TerrainGen.ZONE_B_START:
-		return BOUNDARY_B_COLOR
-	return Color(0, 0, 0, 0)
+func _boundary_x(index: int) -> int:
+	return TerrainGen.ZONE_A_END if index == 0 else TerrainGen.ZONE_B_START
+
+
+func _boundary_color(index: int) -> Color:
+	return BOUNDARY_A_COLOR if index == 0 else BOUNDARY_B_COLOR
+
+
+## 该列最高的实心方块 y（考虑玩家改动）
+func _surface_y(x: int, z: int) -> int:
+	var h := mini(terrain.height_at(x, z), size_y - 1)
+	while h + 1 < size_y and is_solid(Vector3i(x, h + 1, z)):
+		h += 1
+	while h > 0 and not is_solid(Vector3i(x, h, z)):
+		h -= 1
+	return h
+
+
+func _rebuild_boundary_line(index: int) -> void:
+	var mi: MeshInstance3D = _line_nodes[index]
+	if mi == null:
+		return
+	var bx := _boundary_x(index)
+	var lin := _boundary_color(index).srgb_to_linear()
+	var color := Color(lin.r, lin.g, lin.b, 1.0)
+	var fx := float(bx)
+	var hw := LINE_HALF_WIDTH
+	var h := LINE_HEIGHT
+	var verts := PackedVector3Array()
+	var colors := PackedColorArray()
+	var indices := PackedInt32Array()
+
+	var add_quad := func(a: Vector3, b: Vector3, c: Vector3, d: Vector3) -> void:
+		var i := verts.size()
+		verts.append(a)
+		verts.append(b)
+		verts.append(c)
+		verts.append(d)
+		for k in 4:
+			colors.append(color)
+		indices.append_array([i, i + 1, i + 2, i, i + 2, i + 3])
+
+	# 每段都向相邻列的高度延伸，保证整条线连续、忽略地形落差
+	for z in size_z:
+		var y_a := float(_surface_y(bx, z)) + 1.0 + LINE_LIFT
+		var y_b := y_a
+		if z + 1 < size_z:
+			y_b = float(_surface_y(bx, z + 1)) + 1.0 + LINE_LIFT
+		var lo := minf(y_a, y_b)
+		var hi := maxf(y_a, y_b) + h
+		var zf := float(z)
+		# 竖面：平视时看到的一条线
+		add_quad.call(Vector3(fx, lo, zf), Vector3(fx, lo, zf + 1.0), Vector3(fx, hi, zf + 1.0), Vector3(fx, hi, zf))
+		# 顶面：俯视时看到的一条线
+		add_quad.call(Vector3(fx - hw, lo, zf), Vector3(fx + hw, lo, zf), Vector3(fx + hw, lo, zf + 1.0), Vector3(fx - hw, lo, zf + 1.0))
+		add_quad.call(Vector3(fx - hw, hi, zf), Vector3(fx + hw, hi, zf), Vector3(fx + hw, hi, zf + 1.0), Vector3(fx - hw, hi, zf + 1.0))
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	mi.mesh = mesh
+	_line_dirty[index] = false
+
+
+## 方块变动后只标记对应那条线，下一帧重铺
+func mark_boundary_dirty_at(x: int) -> void:
+	if x >= TerrainGen.ZONE_A_END - 1 and x <= TerrainGen.ZONE_A_END:
+		_line_dirty[0] = true
+	if x >= TerrainGen.ZONE_B_START - 1 and x <= TerrainGen.ZONE_B_START:
+		_line_dirty[1] = true
+
+
+func _process(_delta: float) -> void:
+	for i in 2:
+		if _line_dirty[i]:
+			_rebuild_boundary_line(i)
 
 
 func in_bounds(cell: Vector3i) -> bool:
@@ -184,6 +232,7 @@ func set_block(cell: Vector3i, block_id: int) -> void:
 		_mark_dirty(c + Vector2i(0, -1))
 	if (cell.z + 1) % CHUNK == 0:
 		_mark_dirty(c + Vector2i(0, 1))
+	mark_boundary_dirty_at(cell.x)
 
 
 func chunk_of(cell: Vector3i) -> Vector2i:
@@ -392,17 +441,6 @@ func _rebuild(chunk: Chunk) -> void:
 					if nb != BlockDB.AIR and db.is_opaque(nb):
 						continue
 					var color: Color = _colors_top[block_id] if dir.y > 0 else _colors_side[block_id]
-					if dir.x != 0:
-						var plane_x := gx + 1 if dir.x > 0 else gx
-						if plane_x == TerrainGen.ZONE_A_END:
-							color = BOUNDARY_A_COLOR
-						elif plane_x == TerrainGen.ZONE_B_START:
-							color = BOUNDARY_B_COLOR
-					else:
-						# 边界线上的一圈地表染成队色
-						var line_color = _line_color_at(gx)
-						if line_color.a > 0.0:
-							color = line_color
 					color = color.srgb_to_linear() * float(FACE_SHADE[f])
 					var base_index := verts.size()
 					var corners: Array = FACE_CORNERS[f]

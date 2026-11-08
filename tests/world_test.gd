@@ -62,5 +62,16 @@ func _initialize() -> void:
 	_record("两侧可建造", big.is_buildable(Vector3i(50, 20, 77)) and big.is_buildable(Vector3i(200, 20, 77)))
 	_record("中立区宽 56", 156 - 100 == 56)
 
+	# 分界线：改方块后标记待重铺
+	big._line_dirty[0] = false
+	big._line_dirty[1] = false
+	big.set_block(Vector3i(100, big.terrain.height_at(100, 5), 5), BlockDB.AIR)
+	_record("边界方块变动后分界线待重铺", big._line_dirty[0])
+	big.set_block(Vector3i(156, big.terrain.height_at(156, 5), 5), BlockDB.AIR)
+	_record("红线边界变动后分界线待重铺", big._line_dirty[1])
+	big._line_dirty[0] = false
+	big.set_block(Vector3i(50, 30, 5), BlockDB.AIR)
+	_record("远离边界不重铺", not big._line_dirty[0])
+
 	print("通过 %d 项，失败 %d 项" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)
