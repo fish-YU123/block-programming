@@ -49,7 +49,7 @@ func _ready() -> void:
 	hint_label.position = Vector2(16, -54)
 	hint_label.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	hint_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.65))
-	hint_label.text = "WASD 移动 / 空格上升 / Shift 下降 / ⌘ 加速\n按住左键拖动转动视角 / 单击左键挖掘 / 右键放置\n滚轮或数字键 1-8 选方块\nF 放置飞飞 / G 收回 / Q 切换建筑 / B 建建筑 / N 拆建筑 / C 代码面板"
+	hint_label.text = "WASD 移动 / 空格上升 / Shift 下降 / ⌘ 加速\n按住左键拖动转动视角 / 单击左键挖掘 / 右键放置\n数字键 1-8 选方块 / 滚轮调视野\nF 放置飞飞 / G 收回 / Q 切换建筑 / B 建建筑 / N 拆建筑 / C 代码面板"
 	add_child(hint_label)
 
 	overlay_label = Label.new()

@@ -3,6 +3,7 @@ extends CanvasLayer
 ## 快捷键：C 开关面板（面板打开时相机不动、不能挖方块）。
 
 signal apply_pressed(uid: int, code: String)
+signal rerun_pressed(uid: int)
 signal unit_selected(uid: int)
 signal panel_closed
 
@@ -53,6 +54,11 @@ func close() -> void:
 
 func current_uid() -> int:
 	return _current_uid
+
+
+## 键盘焦点是否在代码框里（在别处点击后就为 false）
+func editor_has_focus() -> bool:
+	return editor != null and editor.has_focus()
 
 
 # ---------------------------------------------------------------- 对外接口
@@ -192,6 +198,10 @@ func _build() -> void:
 	apply_button.text = "应用代码 ⌘+回车"
 	apply_button.pressed.connect(_on_apply)
 	action_row.add_child(apply_button)
+	var rerun_button := Button.new()
+	rerun_button.text = "重新运行"
+	rerun_button.pressed.connect(_on_rerun)
+	action_row.add_child(rerun_button)
 	status_label = Label.new()
 	status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -255,6 +265,14 @@ func _on_apply() -> void:
 	if _current_uid < 0:
 		return
 	apply_pressed.emit(_current_uid, editor.text)
+	editor.grab_focus()
+
+
+func _on_rerun() -> void:
+	if _current_uid < 0:
+		return
+	rerun_pressed.emit(_current_uid)
+	editor.grab_focus()
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

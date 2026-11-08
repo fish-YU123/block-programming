@@ -26,7 +26,26 @@ func _check() -> void:
 	_record("开局面板是关闭的", not panel.is_open(), "面板开着")
 	_main._toggle_code_panel()
 	_record("按 C 打开面板", panel.is_open(), "没打开")
-	_record("面板打开时相机不响应输入", _main.rig.input_enabled == false, "相机仍可操作")
+	_main._sync_input_state()
+	_record("在代码框里打字时相机不动", _main.rig.input_enabled == false, "相机仍可操作")
+
+	# 点别处 → 代码框失去焦点 → WASD 恢复
+	panel.editor.release_focus()
+	_main._sync_input_state()
+	_record("点别处后恢复移动", _main.rig.input_enabled == true, "相机被锁住")
+
+	# 滚轮调视野
+	var fov_before: float = _main.rig.camera.fov
+	_main.rig.zoom(-1.0)
+	_record("滚轮缩小视野", _main.rig.camera.fov < fov_before, "%s -> %s" % [fov_before, _main.rig.camera.fov])
+	_main.rig.zoom(1.0)
+
+	# 重新运行：版本号 +1，程序重新加载
+	var uid0: int = int(_main.units[0]["uid"])
+	var rev0: int = int(_main.units[0]["revision"])
+	_main._on_code_rerun(uid0)
+	_record("重新运行版本号 +1", int(_main.units[0]["revision"]) == rev0 + 1, str(_main.units[0]["revision"]))
+	_record("重新运行后程序没停住", not _main.units[0]["controller"].halted(), _main.units[0]["controller"].last_error())
 	var own_count: int = _main.team_units(0).size()
 	_record("面板只列本方单位", panel.unit_list.item_count == own_count, "%d vs %d" % [panel.unit_list.item_count, own_count])
 	_record("面板不列敌方单位", own_count < _main.units.size() or _main.team_units(1).is_empty(), str(_main.units.size()))

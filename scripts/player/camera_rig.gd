@@ -9,6 +9,7 @@ signal look_changed
 var yaw := 0.0
 var pitch := -0.25
 var move_speed := 14.0
+var fov := 70.0
 var fast_multiplier := 3.0
 var mouse_sensitivity := 0.0035
 var dragging := false
@@ -18,6 +19,10 @@ var input_enabled := true
 const MIN_SPEED := 1.0
 const MAX_SPEED := 60.0
 const DRAG_THRESHOLD := 4.0
+## 滚轮缩放视野（度）
+const FOV_MIN := 35.0
+const FOV_MAX := 100.0
+const FOV_STEP := 3.0
 
 var _pressing := false
 var _press_pos := Vector2.ZERO
@@ -25,12 +30,27 @@ var _press_pos := Vector2.ZERO
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if camera != null:
+		camera.fov = fov
+
+
+## 滚轮缩放视野
+func zoom(step: float) -> void:
+	fov = clampf(fov + step * FOV_STEP, FOV_MIN, FOV_MAX)
+	if camera != null:
+		camera.fov = fov
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not input_enabled:
 		return
 	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			zoom(-1.0)
+			return
+		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			zoom(1.0)
+			return
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
 				_pressing = true

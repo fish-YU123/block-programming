@@ -134,6 +134,7 @@ func _ready() -> void:
 	code_panel.apply_pressed.connect(_on_code_applied)
 	code_panel.unit_selected.connect(_on_unit_selected)
 	code_panel.panel_closed.connect(_on_panel_closed)
+	code_panel.rerun_pressed.connect(_on_code_rerun)
 	_highlight = MeshInstance3D.new()
 	_highlight.name = "BlockHighlight"
 	_highlight_material = StandardMaterial3D.new()
@@ -200,6 +201,18 @@ func _panel_open() -> bool:
 	return code_panel != null and code_panel.is_open()
 
 
+## 正在代码框里打字（面板开着并且焦点在编辑器里）——这时才锁住游戏操作
+func _code_typing() -> bool:
+	return code_panel != null and code_panel.is_open() and code_panel.editor_has_focus()
+
+
+## 每帧同步：不在打字就恢复 WASD/挖掘等操作
+func _sync_input_state() -> void:
+	if rig == null:
+		return
+	rig.input_enabled = not _code_typing()
+
+
 func _toggle_code_panel(force_open: bool = false) -> void:
 	if code_panel == null:
 		return
@@ -223,7 +236,6 @@ func _toggle_code_panel(force_open: bool = false) -> void:
 		var first_uid: int = int(items[0]["uid"])
 		code_panel.set_code(first_uid, str(_entry_by_uid(first_uid).get("code", "")))
 	code_panel.open()
-	rig.input_enabled = false
 
 
 func _on_code_applied(uid: int, code: String) -> void:
@@ -236,6 +248,19 @@ func _on_code_applied(uid: int, code: String) -> void:
 	controller.bind(entry["unit"], code, int(entry["revision"]))
 	code_panel.show_error(controller.last_error())
 	code_panel.show_status("已应用（版本 %d）" % int(entry["revision"]))
+
+
+## 重新运行：丢弃当前运行状态、从头再跑一遍（mem 也会清空）
+func _on_code_rerun(uid: int) -> void:
+	var entry := _entry_by_uid(uid)
+	if entry.is_empty():
+		return
+	entry["revision"] = int(entry["revision"]) + 1
+	var controller: UnitController = entry["controller"]
+	controller.bind(entry["unit"], str(entry["code"]), int(entry["revision"]))
+	code_panel.show_status("已重新运行（版本 %d）" % int(entry["revision"]))
+	code_panel.show_error(controller.last_error())
+	code_panel.show_logs([])
 
 
 func _on_unit_selected(uid: int) -> void:
@@ -572,6 +597,7 @@ func _install_environment() -> void:
 func _process(_delta: float) -> void:
 	if world == null or rig == null:
 		return
+	_sync_input_state()
 	world.update_streaming(rig.position)
 	_update_highlight()
 	_update_unit_hud()
@@ -622,7 +648,7 @@ func _aim() -> Dictionary:
 
 
 func _on_primary_click(at: Vector2) -> void:
-	if _panel_open():
+	if _code_typing():
 		return
 	# 先看是不是点在自己单位上：双击打开它的代码
 	var picked := _pick_own_unit(at)
@@ -678,8 +704,6 @@ func _on_unit_clicked(entry: Dictionary) -> void:
 
 ## 直接打开某台单位的代码面板（会顺带把面板切到该单位）
 func _open_code_for(uid: int) -> void:
-	if not _panel_open():
-		rig.input_enabled = false
 	_toggle_code_panel(true)
 	code_panel.set_current(uid)
 	var entry := _entry_by_uid(uid)
@@ -691,13 +715,7 @@ func _open_code_for(uid: int) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventMouseButton) or not event.pressed:
 		return
-	if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-		selected = (selected + 1) % block_options.size()
-		_refresh_hud()
-	elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-		selected = (selected - 1 + block_options.size()) % block_options.size()
-		_refresh_hud()
-	elif event.button_index == MOUSE_BUTTON_RIGHT and rig != null and not _panel_open():
+	if event.button_index == MOUSE_BUTTON_RIGHT and rig != null and not _code_typing():
 		var hit := _aim()
 		if hit.is_empty():
 			return
@@ -721,7 +739,7 @@ func _input(event: InputEvent) -> void:
 	if event.keycode == KEY_C:
 		_toggle_code_panel()
 		return
-	if _panel_open():
+	if _code_typing():
 		return
 	if event.keycode == KEY_F:
 		_place_unit()
