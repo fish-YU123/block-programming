@@ -36,12 +36,15 @@ var _press_pos := Vector2.ZERO
 var _drag_amount := 0.0
 ## 拖动时把鼠标藏起来（捕获模式），松手后回到原来的位置
 var _saved_mouse := Vector2.ZERO
+## 拖动时用一个全透明光标把鼠标"藏"起来（不改鼠标模式，最稳）
+var _blank_cursor: ImageTexture = null
 ## 鼠标压在 UI 面板上时置 true：滚轮不再调视野
 var wheel_blocked := false
 
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_blank_cursor = _make_blank_cursor()
 	if camera != null:
 		camera.fov = fov
 
@@ -73,11 +76,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				_saved_mouse = event.position
 				_drag_amount = 0.0
 				_awaiting_warp = false
-				# 拖动期间把光标藏起来（不捕获，避免某些平台上捕获后收不到相对位移）
-				Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+				# 拖动期间把光标藏起来：换成 1×1 全透明光标，不动鼠标模式
+				if _blank_cursor != null:
+					Input.set_custom_mouse_cursor(_blank_cursor, Input.CURSOR_ARROW)
 			elif _pressing:
 				_pressing = false
-				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+				Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
 				if not dragging:
 					primary_click.emit(_saved_mouse)
 				else:
@@ -135,9 +139,15 @@ func _process(delta: float) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_MOUSE_EXIT:
 		if _pressing:
-			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+			Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
 		_pressing = false
 		dragging = false
+
+
+func _make_blank_cursor() -> ImageTexture:
+	var img := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+	img.set_pixel(0, 0, Color(0, 0, 0, 0))
+	return ImageTexture.create_from_image(img)
 
 
 func look_direction() -> Vector3:
