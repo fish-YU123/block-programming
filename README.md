@@ -19,6 +19,8 @@
 /Users/boyu/Desktop/Godot.app/Contents/MacOS/Godot --path .
 ```
 
+首次启动可能黑屏 30~60 秒（Godot 在这台机器上编译着色器管线缓存，之后就快了）。
+
 操作：WASD 移动 / 空格上升 / Shift 下降 / ⌘ 加速 / 按住左键拖动转视角 / 单击左键挖掘 / 右键放置 / 滚轮或数字键 1-8 选方块。
 
 ## 测试
