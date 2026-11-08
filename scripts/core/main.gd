@@ -32,9 +32,19 @@ var economy: Economy
 var production: Production
 ## 开局资源（还没做采集经济闭环前的启动资金）
 const STARTING_RESOURCES := {"copper": 120, "coal": 60}
+## 队伍
+const TEAM_BLUE := 0
+const TEAM_RED := 1
+## 红方脚本单位（M5 先放 3 台当对手）
+const RED_START := [{"x": 226.0, "z": 108.0}, {"x": 232.0, "z": 128.0}, {"x": 226.0, "z": 150.0}]
+## 激光钻头打单位：每秒伤害 / 有效距离
+const DRILL_DAMAGE_PER_SEC := 45.0
+const DRILL_UNIT_RANGE := 3.2
 ## 每项：{uid, unit, controller, code, revision}
 var units: Array = []
 var _next_uid := 1
+var game_over := ""
+var _physics_frames := 0
 var units_root: Node3D
 ## 预设单位 + 玩家代码（现在还没有编辑器，先用默认代码）
 const MAX_UNITS := 20
@@ -125,19 +135,27 @@ func _setup_units() -> void:
 		if def.is_empty():
 			push_error("找不到预设单位：%s" % spec["id"])
 			continue
-		_spawn_unit(def, Vector3(float(spec["x"]), 0.0, float(spec["z"])), str(spec["code"]))
+		_spawn_unit(def, Vector3(float(spec["x"]), 0.0, float(spec["z"])), str(spec["code"]), TEAM_BLUE)
+	for spec in RED_START:
+		var red_def: Dictionary = unit_db.get_def("feifei")
+		if red_def.is_empty():
+			break
+		_spawn_unit(red_def, Vector3(float(spec["x"]), 0.0, float(spec["z"])), DefaultCode.RED_SOURCE, TEAM_RED)
 
 
-func _spawn_unit(def: Dictionary, at: Vector3, code: String) -> void:
+func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BLUE) -> void:
 	var flyer := Flyer.new()
 	flyer.name = "%s_%d" % [str(def.get("id", "unit")), units.size() + 1]
 	units_root.add_child(flyer)
 	var ground := world.surface_height(int(at.x), int(at.z))
 	flyer.global_position = Vector3(at.x, float(ground) + 6.0, at.z)
 	flyer.setup(world, def)
+	flyer.team = team
+	# 蓝方面朝 +X、红方面朝 -X
+	flyer.rotation.y = -PI * 0.5 if team == TEAM_BLUE else PI * 0.5
 	var controller := UnitController.new()
 	controller.bind(flyer, code, 1)
-	units.append({"uid": _next_uid, "unit": flyer, "controller": controller, "code": code, "revision": 1, "cost": economy.unit_cost(def) if economy != null else {}})
+	units.append({"uid": _next_uid, "unit": flyer, "controller": controller, "code": code, "revision": 1, "team": team, "cost": economy.unit_cost(def) if economy != null else {}})
 	_next_uid += 1
 	flyer.name = "%s_%d" % [str(def.get("id", "unit")), int(units[units.size() - 1]["uid"])]
 
@@ -172,7 +190,7 @@ func _toggle_code_panel() -> void:
 		var controller: UnitController = entry["controller"]
 		items.append({
 			"uid": int(entry["uid"]),
-			"label": flyer.name,
+			"label": ("蓝 " if int(entry.get("team", TEAM_BLUE)) == TEAM_BLUE else "红 ") + flyer.name,
 			"error": controller.last_error() if controller.halted() else "",
 		})
 	code_panel.set_units(items)
@@ -225,11 +243,94 @@ func _update_code_panel() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	_physics_frames += 1
 	if production != null:
 		production.tick(delta)
+	_refresh_enemy_sensors()
 	for entry in units:
 		var controller: UnitController = entry["controller"]
 		controller.tick(delta)
+	_process_combat(delta)
+	_purge_dead()
+	_check_victory()
+
+
+## 把敌方单位的位置塞给每个单位的传感器（按距离排序，最近的前 8 个）
+func _refresh_enemy_sensors() -> void:
+	for entry in units:
+		var self_unit: Flyer = entry["unit"]
+		if not self_unit.alive:
+			continue
+		var enemy_team: int = TEAM_BLUE if int(entry.get("team", TEAM_BLUE)) == TEAM_RED else TEAM_RED
+		var found: Array = []
+		for other in team_units(enemy_team):
+			var o: Flyer = other["unit"]
+			found.append({
+				"x": o.global_position.x,
+				"y": o.global_position.y,
+				"z": o.global_position.z,
+				"d": self_unit.global_position.distance_to(o.global_position),
+			})
+		found.sort_custom(func(a, b): return float(a["d"]) < float(b["d"]))
+		var top: Array = found.slice(0, 8)
+		for item in top:
+			item.erase("d")
+		var controller: UnitController = entry["controller"]
+		controller.set_enemies(top)
+
+
+func team_units(team: int) -> Array:
+	var out: Array = []
+	for entry in units:
+		var flyer: Flyer = entry["unit"]
+		if int(entry.get("team", TEAM_BLUE)) == team and flyer.alive:
+			out.append(entry)
+	return out
+
+
+## 激光钻头打敌方单位：正前方、距离够近、正在钻
+func _process_combat(delta: float) -> void:
+	for attacker_entry in units:
+		var attacker: Flyer = attacker_entry["unit"]
+		if not attacker.alive or not bool(attacker.controls.get("drill", false)):
+			continue
+		if attacker.energy_out:
+			continue
+		for victim_entry in units:
+			var victim: Flyer = victim_entry["unit"]
+			if victim == attacker or not victim.alive:
+				continue
+			if int(victim_entry.get("team", TEAM_BLUE)) == int(attacker_entry.get("team", TEAM_BLUE)):
+				continue
+			if attacker.global_position.distance_to(victim.global_position) <= DRILL_UNIT_RANGE:
+				victim.take_damage(DRILL_DAMAGE_PER_SEC * delta)
+
+
+func _purge_dead() -> void:
+	var survivors: Array = []
+	for entry in units:
+		var flyer: Flyer = entry["unit"]
+		if flyer.alive:
+			survivors.append(entry)
+		else:
+			var node: Node3D = entry["unit"]
+			if is_instance_valid(node):
+				node.queue_free()
+	units = survivors
+
+
+func _check_victory() -> void:
+	if game_over != "":
+		return
+	if _physics_frames < 30:
+		return  # 开局 0.5 秒内不判负，等代码跑起来
+	if team_units(TEAM_RED).is_empty():
+		game_over = "蓝方胜利"
+	elif team_units(TEAM_BLUE).is_empty():
+		game_over = "红方胜利"
+	if game_over != "":
+		hud.show_overlay(game_over + "\n按 R 重开")
+		hud.show_message(game_over, 6.0)
 
 
 func _install_environment() -> void:
@@ -364,6 +465,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	if event.keycode == KEY_R and game_over != "":
+		get_tree().reload_current_scene()
 		return
 	if event.keycode == KEY_C:
 		_toggle_code_panel()

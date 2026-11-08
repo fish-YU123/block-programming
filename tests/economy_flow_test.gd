@@ -49,20 +49,20 @@ func _check() -> void:
 	var copper_before: int = economy.amount("copper")
 	var coal_before: int = economy.amount("coal")
 	_main._place_unit()
-	_record("放置后单位数 +1", _main.units.size() == 2, str(_main.units.size()))
+	_record("放置后蓝队单位数 +1", _main.team_units(0).size() == 2, str(_main.units.size()))
 	_record("放置扣铜 25", economy.amount("copper") == copper_before - 25, str(economy.amount("copper")))
 	_record("放置扣煤 10", economy.amount("coal") == coal_before - 10, str(economy.amount("coal")))
 
 	# 收回退款
 	_main._remove_last_unit()
-	_record("收回后单位数 -1", _main.units.size() == 1, str(_main.units.size()))
+	_record("收回后蓝队单位数 -1", _main.team_units(0).size() == 1, str(_main.units.size()))
 	_record("收回退款铜", economy.amount("copper") == copper_before, str(economy.amount("copper")))
 	_record("收回退款煤", economy.amount("coal") == coal_before, str(economy.amount("coal")))
 
 	# 资源不足时放不下去
 	economy.spend({"copper": economy.amount("copper"), "coal": economy.amount("coal")})
 	_main._place_unit()
-	_record("资源不足放不下单位", _main.units.size() == 1, str(_main.units.size()))
+	_record("资源不足放不下单位", _main.team_units(0).size() == 1, str(_main.units.size()))
 
 	# 生产链路：补资源后 tick 一段时间应该产出电池
 	economy.add("coal", 3)

@@ -16,6 +16,11 @@ var hover_thrust := 2100.0
 var rcs_thrust := 320.0
 var gimbal_rad := 0.42
 var radar_radius := 2
+## 队伍（0=蓝方玩家，1=红方）
+var team := 0
+var max_hp := 120.0
+var hp := 120.0
+var alive := true
 ## 单位外接立方体边长（米）：0.75×0.75×0.75
 var unit_size := 0.75
 var drill_reach := 3.4
@@ -49,6 +54,8 @@ func setup(world_node: Node3D, def: Dictionary) -> void:
 	gimbal_rad = deg_to_rad(float(def.get("gimbal_deg", 24.0)))
 	radar_radius = int(def.get("radar_radius", 2))
 	unit_size = float(def.get("size", 0.75))
+	max_hp = float(def.get("hp", 120.0))
+	hp = max_hp
 	var drill: Dictionary = def.get("drill", {})
 	drill_reach = float(drill.get("reach", 3.4))
 	drill_cooldown = float(drill.get("cooldown", 0.25))
@@ -65,6 +72,7 @@ func setup(world_node: Node3D, def: Dictionary) -> void:
 	linear_damp = 0.3
 	angular_damp = 2.5
 	can_sleep = false
+	continuous_cd = true
 	contact_monitor = false
 	collision_layer = 2
 	collision_mask = 1
@@ -93,6 +101,12 @@ func _physics_process(delta: float) -> void:
 		forward = 0.0
 		drilling = false
 
+	# 卡进方块里时自己抬出来（防止被地形吞掉后永远出不来）
+	if world != null:
+		var body_cell := Vector3i(floori(global_position.x), floori(global_position.y), floori(global_position.z))
+		if world.is_solid(body_cell):
+			global_position.y += 0.08
+
 	# 底部矢量喷口：推力方向随 gimbal 偏转，产生侧移
 	# 喷口朝下喷气，反作用力向上；偏转产生侧移
 	var dir_local := Vector3(sin(roll * gimbal_rad), 1.0, -sin(pitch * gimbal_rad)).normalized()
@@ -120,6 +134,29 @@ func _physics_process(delta: float) -> void:
 	if drilling and _drill_cd <= 0.0:
 		_drill_cd = drill_cooldown
 		_drill_once()
+
+
+## 受到伤害；血量归零则失去战斗能力
+func take_damage(amount: float) -> void:
+	if not alive or amount <= 0.0:
+		return
+	hp = maxf(0.0, hp - amount)
+	if hp <= 0.0:
+		alive = false
+		controls = {"lift": 0.0, "pitch": 0.0, "roll": 0.0, "turn": 0.0, "forward": 0.0, "drill": false}
+		visible = false
+		set_physics_process(false)
+		collision_layer = 0
+		collision_mask = 0
+
+
+## 钻头是否正对某个世界坐标（用于打敌方单位）
+func aims_at(point: Vector3, max_range: float) -> bool:
+	var forward := -global_transform.basis.z
+	var delta := point - global_position
+	if delta.length() > max_range:
+		return false
+	return forward.dot(delta.normalized()) > 0.7
 
 
 func _drill_once() -> void:

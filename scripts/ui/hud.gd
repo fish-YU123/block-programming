@@ -7,6 +7,7 @@ var block_label: Label
 var crosshair: Control
 var message_label: Label
 var resources_label: Label
+var overlay_label: Label
 var _message_timer := 0.0
 
 
@@ -51,6 +52,15 @@ func _ready() -> void:
 	hint_label.text = "WASD 移动 / 空格上升 / Shift 下降 / ⌘ 加速\n按住左键拖动转动视角 / 单击左键挖掘 / 右键放置\n滚轮或数字键 1-8 选方块\nF 放置飞飞 / G 收回最后一台"
 	add_child(hint_label)
 
+	overlay_label = Label.new()
+	overlay_label.set_anchors_preset(Control.PRESET_CENTER)
+	overlay_label.position = Vector2(-300, -60)
+	overlay_label.size = Vector2(600, 120)
+	overlay_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	overlay_label.add_theme_font_size_override("font_size", 40)
+	overlay_label.add_theme_color_override("font_color", Color(1, 0.95, 0.6))
+	add_child(overlay_label)
+
 	message_label = Label.new()
 	message_label.set_anchors_preset(Control.PRESET_CENTER)
 	message_label.position = Vector2(-200, 120)
@@ -72,6 +82,10 @@ func _process(delta: float) -> void:
 
 func set_info(text: String) -> void:
 	info_label.text = text
+
+
+func show_overlay(text: String) -> void:
+	overlay_label.text = text
 
 
 func set_resources(text: String) -> void:

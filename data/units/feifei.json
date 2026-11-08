@@ -7,6 +7,7 @@
     "coal": 10
   },
   "size": 0.75,
+  "hp": 120.0,
   "mass": 12.0,
   "energy_j": 120000.0,
   "hover_thrust_n": 520.0,

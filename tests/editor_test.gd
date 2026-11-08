@@ -27,7 +27,7 @@ func _check() -> void:
 	_main._toggle_code_panel()
 	_record("按 C 打开面板", panel.is_open(), "没打开")
 	_record("面板打开时相机不响应输入", _main.rig.input_enabled == false, "相机仍可操作")
-	_record("面板列出了单位", panel.unit_list.item_count == 1, str(panel.unit_list.item_count))
+	_record("面板列出了单位", panel.unit_list.item_count == _main.units.size(), str(panel.unit_list.item_count))
 
 	var uid: int = int(_main.units[0]["uid"])
 	# 先应用一份有语法错误的代码

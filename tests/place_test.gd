@@ -22,15 +22,15 @@ func _process(_delta: float) -> bool:
 
 
 func _check() -> void:
-	var units: Array = _main.units
-	_record("开局有一台飞飞", units.size() == 1, str(units.size()))
+	_record("开局有一台蓝队飞飞", _main.team_units(0).size() == 1, str(_main.team_units(0).size()))
 	_main._place_unit()
-	_record("按 F 放下一台", units.size() == 2, str(units.size()))
+	_record("按 F 放下一台", _main.team_units(0).size() == 2, str(_main.team_units(0).size()))
 	_main._place_unit()
-	_record("可以继续放", units.size() == 3, str(units.size()))
+	_record("可以继续放", _main.team_units(0).size() == 3, str(_main.team_units(0).size()))
 	_main._remove_last_unit()
-	_record("按 G 收回一台", units.size() == 2, str(units.size()))
-	_record("剩余单位仍然有效", is_instance_valid(units[1]["unit"]), "节点无效")
+	_record("按 G 收回一台", _main.team_units(0).size() == 2, str(_main.team_units(0).size()))
+	var units: Array = _main.team_units(0)
+	_record("剩余单位仍然有效", units.size() == 2 and is_instance_valid(units[1]["unit"]), "节点无效")
 
 	var flyer: Node3D = units[0]["unit"]
 	var controller = units[0]["controller"]

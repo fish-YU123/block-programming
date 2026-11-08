@@ -15,6 +15,8 @@ var source := ""
 var revision := 0
 var logs: Array = []
 
+var enemies: Array = []
+
 var _vm: PyVM
 var _budget := 0.0
 var _halted := false
@@ -35,6 +37,11 @@ func bind(unit_node: Node3D, code: String, code_revision: int) -> void:
 		_halted = true
 		_last_error = _vm.error
 	_apply_idle_controls()
+
+
+## 由主场景每帧更新：视野内敌方单位（[{"x","y","z","team"}]，按距离排序）
+func set_enemies(list: Array) -> void:
+	enemies = list
 
 
 func halted() -> bool:
@@ -106,4 +113,5 @@ func _inject_sensors() -> void:
 		"blocks": radar["blocks"],
 		"heights": radar["heights"],
 		"here": unit.block_here(),
+		"enemies": enemies,
 	})
