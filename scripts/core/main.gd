@@ -332,8 +332,8 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 	units_root.add_child(unit)
 	var ground := world.surface_height(int(at.x), int(at.z))
 	unit.global_position = Vector3(at.x, float(ground) + 6.0, at.z)
-	unit.setup(world, def)
 	unit.team = team
+	unit.setup(world, def)
 	# 蓝方面朝 +X、红方面朝 -X
 	unit.rotation.y = -PI * 0.5 if team == TEAM_BLUE else PI * 0.5
 	var controller := UnitController.new()
@@ -919,6 +919,27 @@ func _building_placement(at_cell: Vector3i, team: int, size: Vector3i) -> Dictio
 	elif team == TEAM_RED and at_cell.x < TerrainGen.ZONE_B_START:
 		reason = "只能在自己的半场建造"
 	if reason == "":
+		# 地面必须平：每一列的地表高度都要正好等于基座高度，否则建筑会一半埋土一半悬空
+		for dx in size.x:
+			for dz in size.z:
+				if world.surface_height(at_cell.x + dx, at_cell.z + dz) != at_cell.y:
+					reason = "地面不平，先把这块铺平"
+					break
+			if reason != "":
+				break
+	if reason == "":
+		# 占地范围里不能站着单位（不然单位会被糊进墙里）
+		for entry in units:
+			var u: RigidBody3D = entry["unit"]
+			if not u.alive:
+				continue
+			var p := u.global_position
+			if p.x >= float(at_cell.x) and p.x <= float(at_cell.x + size.x) \
+					and p.z >= float(at_cell.z) and p.z <= float(at_cell.z + size.z) \
+					and p.y >= float(at_cell.y) - 0.8 and p.y <= float(at_cell.y + size.y) + 0.8:
+				reason = "这里有单位挡着，先让它飞走"
+				break
+	if reason == "":
 		for dx in size.x:
 			for dz in size.z:
 				var cell := Vector3i(at_cell.x + dx, at_cell.y, at_cell.z + dz)
@@ -934,14 +955,18 @@ func _building_placement(at_cell: Vector3i, team: int, size: Vector3i) -> Dictio
 			if reason != "":
 				break
 	if reason == "":
+		# 用 AABB 判重叠，任意一格相交都算（角点检查会漏掉交叉重叠）
+		var amin := at_cell
+		var amax := at_cell + size
 		for entry in buildings:
 			var node = entry["node"]
-			for dy in size.y:
-				if node.occupies(Vector3i(at_cell.x, at_cell.y + dy, at_cell.z)) \
-						or node.occupies(Vector3i(at_cell.x + size.x - 1, at_cell.y + dy, at_cell.z + size.z - 1)):
-					reason = "和已有建筑重叠"
-					break
-			if reason != "":
+			var bmin: Vector3i = node.base_cell
+			var bmax: Vector3i = node.base_cell + node.size
+			var overlap := amin.x < bmax.x and amax.x > bmin.x \
+					and amin.y < bmax.y and amax.y > bmin.y \
+					and amin.z < bmax.z and amax.z > bmin.z
+			if overlap:
+				reason = "和已有建筑重叠"
 				break
 	return {"ok": reason == "", "reason": reason}
 

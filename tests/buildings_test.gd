@@ -38,7 +38,7 @@ func _flat_spot(near_x: int, near_z: int) -> Vector3i:
 						flat = false
 			if not flat:
 				continue
-			return Vector3i(x, int(h) + 1, z)
+			return Vector3i(x, int(h), z)
 	return Vector3i(-1, -1, -1)
 
 

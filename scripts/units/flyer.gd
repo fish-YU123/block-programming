@@ -491,9 +491,12 @@ func block_here() -> String:
 func _build_visual() -> void:
 	# 所有尺寸以 0.75 米立方体为单位，k 按实际 unit_size 缩放
 	var k := unit_size / 0.75
-	var body_mat: StandardMaterial3D = MatCache.solid("flyer_body", Color(0.25, 0.28, 0.34))
-	var trim_mat: StandardMaterial3D = MatCache.solid("flyer_trim", Color(0.92, 0.55, 0.15))
-	var glass_mat: StandardMaterial3D = MatCache.solid("flyer_glass", Color(0.3, 0.75, 0.9), false, 1.0)
+	# 机身配色按队伍区分：蓝方=深蓝 + 青色识别条，红方=赤红 + 橙色识别条
+	var body_color := Color(0.16, 0.28, 0.62) if team == 0 else Color(0.62, 0.15, 0.14)
+	var trim_color := Color(0.28, 0.85, 0.95) if team == 0 else Color(0.98, 0.62, 0.18)
+	var body_mat: StandardMaterial3D = MatCache.solid("flyer_body_%d" % team, body_color)
+	var trim_mat: StandardMaterial3D = MatCache.solid("flyer_trim_%d" % team, trim_color)
+	var glass_mat: StandardMaterial3D = MatCache.solid("flyer_glass_%d" % team, Color(0.3, 0.75, 0.9), false, 1.0)
 
 	var model := Node3D.new()
 	model.name = "Model"
