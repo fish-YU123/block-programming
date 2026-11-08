@@ -12,6 +12,8 @@ var move_speed := 14.0
 var fast_multiplier := 3.0
 var mouse_sensitivity := 0.0035
 var dragging := false
+## 打开 UI 面板时置 false：相机不再响应鼠标和键盘
+var input_enabled := true
 
 const MIN_SPEED := 1.0
 const MAX_SPEED := 60.0
@@ -26,6 +28,8 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not input_enabled:
+		return
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
@@ -49,6 +53,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	rotation = Vector3(pitch, yaw, 0.0)
+	if not input_enabled:
+		return
 	var dir := Vector3.ZERO
 	var basis := Basis.from_euler(Vector3(0.0, yaw, 0.0))
 	if Input.is_key_pressed(KEY_W):

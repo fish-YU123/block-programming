@@ -6,6 +6,7 @@ var hint_label: Label
 var block_label: Label
 var crosshair: Control
 var message_label: Label
+var resources_label: Label
 var _message_timer := 0.0
 
 
@@ -30,6 +31,12 @@ func _ready() -> void:
 	info_label.position = Vector2(16, 12)
 	info_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
 	add_child(info_label)
+
+	resources_label = Label.new()
+	resources_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	resources_label.position = Vector2(-320, 12)
+	resources_label.add_theme_color_override("font_color", Color(0.95, 0.9, 0.6, 0.95))
+	add_child(resources_label)
 
 	block_label = Label.new()
 	block_label.position = Vector2(16, 38)
@@ -65,6 +72,10 @@ func _process(delta: float) -> void:
 
 func set_info(text: String) -> void:
 	info_label.text = text
+
+
+func set_resources(text: String) -> void:
+	resources_label.text = text
 
 
 func set_block_name(text: String) -> void:

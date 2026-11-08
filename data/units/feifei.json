@@ -2,6 +2,10 @@
   "id": "feifei",
   "display_name": "飞飞",
   "hint": "悬浮侦察机：底部矢量喷口 + 两侧 RCS + 前置激光钻头 + 顶部雷达",
+  "cost": {
+    "copper": 25,
+    "coal": 10
+  },
   "size": 0.75,
   "mass": 12.0,
   "energy_j": 120000.0,

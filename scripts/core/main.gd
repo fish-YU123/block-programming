@@ -9,6 +9,9 @@ const UnitDB = preload("res://scripts/units/unit_db.gd")
 const Flyer = preload("res://scripts/units/flyer.gd")
 const UnitController = preload("res://scripts/units/unit_controller.gd")
 const DefaultCode = preload("res://scripts/units/unit_code_default.gd")
+const CodePanel = preload("res://scripts/ui/code_panel.gd")
+const Economy = preload("res://scripts/economy/economy.gd")
+const Production = preload("res://scripts/economy/production.gd")
 
 const WORLD_SIZE_X := 256
 const WORLD_SIZE_Z := 256
@@ -24,7 +27,14 @@ var block_options: Array[int] = []
 var selected := 0
 
 var unit_db: UnitDB
-var units: Array = []          ## [{unit: Flyer, controller: UnitController}]
+var code_panel: CodePanel
+var economy: Economy
+var production: Production
+## 开局资源（还没做采集经济闭环前的启动资金）
+const STARTING_RESOURCES := {"copper": 120, "coal": 60}
+## 每项：{uid, unit, controller, code, revision}
+var units: Array = []
+var _next_uid := 1
 var units_root: Node3D
 ## 预设单位 + 玩家代码（现在还没有编辑器，先用默认代码）
 const MAX_UNITS := 20
@@ -70,6 +80,13 @@ func _ready() -> void:
 	rig.yaw = -1.5708
 	world.prefetch(rig.position, 20)
 
+	economy = Economy.new()
+	economy.setup(db, STARTING_RESOURCES)
+	production = Production.new()
+	production.setup(economy)
+	# 一个示例配方：3 煤 + 1 铜 → 30 秒产 1 块「电池」（M4 先打通链路，具体数值后面调）
+	production.add_recipe("battery", {"coal": 3, "copper": 1}, {"battery": 1}, 30.0)
+
 	units_root = Node3D.new()
 	units_root.name = "Units"
 	add_child(units_root)
@@ -78,6 +95,13 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.name = "Hud"
 	add_child(hud)
+
+	code_panel = CodePanel.new()
+	code_panel.name = "CodePanel"
+	add_child(code_panel)
+	code_panel.apply_pressed.connect(_on_code_applied)
+	code_panel.unit_selected.connect(_on_unit_selected)
+	code_panel.panel_closed.connect(_on_panel_closed)
 	_highlight = MeshInstance3D.new()
 	_highlight.name = "BlockHighlight"
 	_highlight_material = StandardMaterial3D.new()
@@ -113,10 +137,96 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String) -> void:
 	flyer.setup(world, def)
 	var controller := UnitController.new()
 	controller.bind(flyer, code, 1)
-	units.append({"unit": flyer, "controller": controller})
+	units.append({"uid": _next_uid, "unit": flyer, "controller": controller, "code": code, "revision": 1, "cost": economy.unit_cost(def) if economy != null else {}})
+	_next_uid += 1
+	flyer.name = "%s_%d" % [str(def.get("id", "unit")), int(units[units.size() - 1]["uid"])]
+
+
+func _cost_text(cost: Dictionary) -> String:
+	var parts: PackedStringArray = []
+	for kind in cost:
+		parts.append("%s %d" % [str(kind), int(cost[kind])])
+	return "、".join(parts)
+
+
+func _entry_by_uid(uid: int) -> Dictionary:
+	for entry in units:
+		if int(entry["uid"]) == uid:
+			return entry
+	return {}
+
+
+func _panel_open() -> bool:
+	return code_panel != null and code_panel.is_open()
+
+
+func _toggle_code_panel() -> void:
+	if code_panel == null:
+		return
+	if code_panel.is_open():
+		code_panel.close()
+		return
+	var items: Array = []
+	for entry in units:
+		var flyer: Flyer = entry["unit"]
+		var controller: UnitController = entry["controller"]
+		items.append({
+			"uid": int(entry["uid"]),
+			"label": flyer.name,
+			"error": controller.last_error() if controller.halted() else "",
+		})
+	code_panel.set_units(items)
+	if not units.is_empty():
+		var first: Dictionary = units[0]
+		code_panel.set_code(int(first["uid"]), str(first["code"]))
+	code_panel.open()
+	rig.input_enabled = false
+
+
+func _on_code_applied(uid: int, code: String) -> void:
+	var entry := _entry_by_uid(uid)
+	if entry.is_empty():
+		return
+	entry["code"] = code
+	entry["revision"] = int(entry["revision"]) + 1
+	var controller: UnitController = entry["controller"]
+	controller.bind(entry["unit"], code, int(entry["revision"]))
+	code_panel.show_error(controller.last_error())
+	code_panel.show_status("已应用（版本 %d）" % int(entry["revision"]))
+
+
+func _on_unit_selected(uid: int) -> void:
+	var entry := _entry_by_uid(uid)
+	if entry.is_empty():
+		return
+	code_panel.set_code(uid, str(entry["code"]))
+
+
+func _on_panel_closed() -> void:
+	rig.input_enabled = true
+
+
+func _update_code_panel() -> void:
+	if code_panel == null or not code_panel.is_open():
+		return
+	var uid := code_panel.current_uid()
+	var entry := _entry_by_uid(uid)
+	if entry.is_empty():
+		return
+	var flyer: Flyer = entry["unit"]
+	var controller: UnitController = entry["controller"]
+	var altitude := flyer.global_position.y - float(world.surface_height(floori(flyer.global_position.x), floori(flyer.global_position.z)))
+	code_panel.show_status("%s ｜ 高度 %.1f 米 ｜ 电量 %.0f%% ｜ 代码版本 %d" % [flyer.name, altitude, flyer.energy_j / flyer.energy_max * 100.0, int(entry["revision"])])
+	if controller.halted():
+		code_panel.show_error(controller.last_error())
+	else:
+		code_panel.show_error("")
+	code_panel.show_logs(controller.logs)
 
 
 func _physics_process(delta: float) -> void:
+	if production != null:
+		production.tick(delta)
 	for entry in units:
 		var controller: UnitController = entry["controller"]
 		controller.tick(delta)
@@ -165,6 +275,7 @@ func _process(_delta: float) -> void:
 	world.update_streaming(rig.position)
 	_update_highlight()
 	_update_unit_hud()
+	_update_code_panel()
 
 
 func _update_highlight() -> void:
@@ -211,13 +322,20 @@ func _aim() -> Dictionary:
 
 
 func _on_primary_click() -> void:
+	if _panel_open():
+		return
 	var hit := _aim()
 	if hit.is_empty():
 		return
 	var cell: Vector3i = hit["cell"]
-	if world.get_block(cell) == BlockDB.AIR:
+	var block_id := world.get_block(cell)
+	if block_id == BlockDB.AIR:
 		return
+	var drop := economy.mine_block(block_id)
 	world.set_block(cell, BlockDB.AIR)
+	if drop != "":
+		hud.show_message("挖到 %s（+1）" % drop)
+	_refresh_hud()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -229,7 +347,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 		selected = (selected - 1 + block_options.size()) % block_options.size()
 		_refresh_hud()
-	elif event.button_index == MOUSE_BUTTON_RIGHT and rig != null:
+	elif event.button_index == MOUSE_BUTTON_RIGHT and rig != null and not _panel_open():
 		var hit := _aim()
 		if hit.is_empty():
 			return
@@ -246,6 +364,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
+		return
+	if event.keycode == KEY_C:
+		_toggle_code_panel()
+		return
+	if _panel_open():
 		return
 	if event.keycode == KEY_F:
 		_place_unit()
@@ -271,6 +394,10 @@ func _place_unit() -> void:
 	var def: Dictionary = unit_db.get_def("feifei")
 	if def.is_empty():
 		return
+	var cost: Dictionary = economy.unit_cost(def)
+	if not economy.can_afford(cost):
+		hud.show_message("资源不足：%s" % _cost_text(cost))
+		return
 	var at := Vector3.ZERO
 	var hit := _aim()
 	if not hit.is_empty():
@@ -280,8 +407,10 @@ func _place_unit() -> void:
 	at.x = clampf(at.x, 1.0, float(world.size_x) - 2.0)
 	at.z = clampf(at.z, 1.0, float(world.size_z) - 2.0)
 	var ground := world.surface_height(floori(at.x), floori(at.z))
+	economy.spend(cost)
 	_spawn_unit(def, Vector3(at.x, float(ground), at.z), DefaultCode.FLYER_SOURCE)
 	hud.show_message("放下飞飞（共 %d 台）" % units.size())
+	_refresh_hud()
 
 
 func _remove_last_unit() -> void:
@@ -290,7 +419,10 @@ func _remove_last_unit() -> void:
 	var entry: Dictionary = units.pop_back()
 	var node: Node3D = entry["unit"]
 	node.queue_free()
+	if entry.has("cost"):
+		economy.refund(entry["cost"])
 	hud.show_message("收回一台飞飞（剩 %d 台）" % units.size())
+	_refresh_hud()
 
 
 func _update_unit_hud() -> void:
@@ -302,7 +434,16 @@ func _update_unit_hud() -> void:
 	var text := "单位 %d 台 ｜ %s  高度 %.1f 米  电量 %.0f%%" % [units.size(), flyer.display_name, flyer.global_position.y - float(world.surface_height(floori(flyer.global_position.x), floori(flyer.global_position.z))), flyer.energy_j / flyer.energy_max * 100.0]
 	if controller.halted():
 		text += "\n代码出错：%s" % controller.last_error()
-	hud.set_info(text)
+	hud.set_info(text + "\nC 打开代码面板")
+	hud.set_resources(_resources_text())
+
+
+func _resources_text() -> String:
+	var parts: PackedStringArray = []
+	var all: Dictionary = economy.all() if economy != null else {}
+	for kind in all:
+		parts.append("%s %d" % [str(kind), int(all[kind])])
+	return "资源：" + ("、".join(parts) if not parts.is_empty() else "无")
 
 
 func _refresh_hud() -> void:
