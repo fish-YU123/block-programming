@@ -316,7 +316,18 @@ func forward_dir() -> Vector3:
 
 ## 打一发光束/炮弹的视觉效果（伤害在 main 里结算）
 func _fire_gun_once() -> void:
-	gun_fired.emit(self, muzzle_world(), forward_dir())
+	# 炮口方向：优先打玩家指定的目标点（code 里 shoot(x,y,z)），
+	# 否则按机头朝向（单位不一定转得过来，直接朝目标点更可靠）
+	var dir := forward_dir()
+	var target := Vector3(
+		float(controls.get("shoot_x", 0.0)),
+		float(controls.get("shoot_y", 0.0)),
+		float(controls.get("shoot_z", 0.0)))
+	var from := muzzle_world()
+	var to_target := target - from
+	if to_target.length() > 0.5:
+		dir = to_target.normalized()
+	gun_fired.emit(self, from, dir)
 
 
 ## 在两点之间画一根细柱（激光/曳光弹共用）

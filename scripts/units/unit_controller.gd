@@ -54,6 +54,47 @@ func set_enemies(list: Array) -> void:
 
 
 ## 由主场景每帧更新：玩家标记的指令（[{"x","y","z","action","id","dist"}]，按距离排序）
+## 正下方最近的实心方块（给挖矿 AI 用，整数格，稳）
+func _first_solid_below(u: Node, pos: Dictionary) -> Dictionary:
+	var world = u.get("world")
+	if world == null:
+		return {}
+	# 必须从枪口（机头前上方）往下打，才和激光实际命中的格子一致
+	var from: Vector3 = u.muzzle_world()
+	var hit: Dictionary = world.raycast(from, from + Vector3(0.0, -7.0, 0.0))
+	if hit.is_empty():
+		return {}
+	var cell: Vector3i = hit["cell"]
+	return {"x": cell.x, "y": cell.y, "z": cell.z}
+
+
+## 在 5×5×5 的 blocks3 里找最近的矿（GDScript 里扫，别让 VM 自己循环 125 次）
+func _nearest_ore(blocks3: Array, cell: Dictionary) -> Dictionary:
+	if blocks3.is_empty():
+		return {}
+	var best: Dictionary = {}
+	var best_d := 999.0
+	for dx in range(-2, 3):
+		for dy in range(-2, 3):
+			for dz in range(-2, 3):
+				var layer: Array = blocks3[dx + 2]
+				var column: Array = layer[dy + 2]
+				var name := str(column[dz + 2])
+				if name != "coal_ore" and name != "copper_ore" and name != "iron_ore" and name != "gold_ore":
+					continue
+				var d: float = absf(float(dx)) + absf(float(dy)) * 1.5 + absf(float(dz))
+				if d < best_d:
+					best_d = d
+					best = {
+						"x": int(cell["x"]) + dx,
+						"y": int(cell["y"]) + dy,
+						"z": int(cell["z"]) + dz,
+						"name": name,
+						"dist": d,
+					}
+	return best
+
+
 func set_peace(seconds: float) -> void:
 	peace_left = seconds
 
@@ -171,13 +212,16 @@ func _inject_sensors(refresh_lists: bool) -> void:
 	var s: Dictionary = unit.sense()
 	var radar: Dictionary = unit.radar()
 	if refresh_lists or _list_snapshot.is_empty():
+		var blocks3: Array = radar.get("blocks3", [])
 		_list_snapshot = {
 			"blocks": radar["blocks"],
 			"heights": radar["heights"],
-			"blocks3": radar.get("blocks3", []),
+			"blocks3": blocks3,
 			"here": unit.block_here(),
 			"enemies": enemies.duplicate(true),
 			"orders": orders.duplicate(true),
+			"ore": _nearest_ore(blocks3, s["cell"]),
+			"below": _first_solid_below(unit, s["pos"]),
 		}
 	_vm.inject({
 		"pos": s["pos"],
@@ -186,6 +230,10 @@ func _inject_sensors(refresh_lists: bool) -> void:
 		"yaw": s["yaw"],
 		"energy": s["energy"],
 		"energy_ratio": s["energy_ratio"],
+		"hp": unit.hp,
+		"hp_max": unit.max_hp,
+		"hp_ratio": unit.hp / unit.max_hp if unit.max_hp > 0.0 else 0.0,
+		"team": unit.team,
 		"thrust": s["thrust"],
 		"drill_hits": s["drill_hits"],
 		"blocks": _list_snapshot["blocks"],
@@ -194,6 +242,8 @@ func _inject_sensors(refresh_lists: bool) -> void:
 		"here": _list_snapshot["here"],
 		"enemies": _list_snapshot["enemies"],
 		"orders": _list_snapshot["orders"],
+		"ore": _list_snapshot.get("ore", {}),
+		"below": _list_snapshot.get("below", {}),
 		"moving": unit.moving,
 		"peace": peace_left,
 	})

@@ -15,6 +15,7 @@ class Chunk:
 	var mesh_instance: MeshInstance3D
 	var body: StaticBody3D
 	var shape: ConcavePolygonShape3D
+	var col: CollisionShape3D
 	var dirty := false
 	var built := false
 
@@ -480,6 +481,7 @@ func _build(coord: Vector2i) -> void:
 	chunk.body.collision_mask = 0
 	var col := CollisionShape3D.new()
 	chunk.shape = ConcavePolygonShape3D.new()
+	chunk.col = col
 	col.shape = chunk.shape
 	chunk.body.add_child(col)
 	chunk.add_child(chunk.mesh_instance)
@@ -661,7 +663,23 @@ func _rebuild(chunk: Chunk) -> void:
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 		mesh.surface_set_material(0, _material)
 	chunk.mesh_instance.mesh = mesh
-	chunk.shape.set_faces(faces)
+	# 注意：Jolt 物理后端不会因为 ConcavePolygonShape3D 内容变化就刷新静态体，
+	# 挖掉方块后碰撞会一直卡在原来的面上（钻头/激光射线打空）。所以每次重建都换一个新的
+	# StaticBody3D + CollisionShape3D。
+	var new_shape := ConcavePolygonShape3D.new()
+	new_shape.set_faces(faces)
+	chunk.shape = new_shape
+	if chunk.body != null:
+		chunk.body.free()
+	var body := StaticBody3D.new()
+	body.collision_layer = 1
+	body.collision_mask = 0
+	var col := CollisionShape3D.new()
+	col.shape = new_shape
+	body.add_child(col)
+	chunk.body = body
+	chunk.col = col
+	chunk.add_child(body)
 	chunk.built = true
 
 
@@ -672,16 +690,69 @@ func is_buildable(cell: Vector3i) -> bool:
 
 ## 射线检测：返回 {cell, normal, point}，未命中返回空字典
 func raycast(from: Vector3, to: Vector3) -> Dictionary:
-	var space := get_world_3d().direct_space_state
-	var query := PhysicsRayQueryParameters3D.create(from, to, 1)
-	query.collide_with_areas = false
-	var hit := space.intersect_ray(query)
-	if hit.is_empty():
+	# 自己做体素 DDA：Jolt 的凹陷形状在挖掉方块后不一定立刻刷新，
+	# 而瞄准/激光/钻头都吃这条射线，所以绕开物理引擎，直接按方块数据步进。
+	var dir := to - from
+	var dist := dir.length()
+	if dist < 0.0001:
 		return {}
-	var point: Vector3 = hit["position"]
-	var normal: Vector3 = hit["normal"]
-	var cell := Vector3i(
-		floori(point.x - normal.x * 0.5),
-		floori(point.y - normal.y * 0.5),
-		floori(point.z - normal.z * 0.5))
-	return {"cell": cell, "normal": Vector3i(normal.round()), "point": point}
+	dir /= dist
+	var cell := Vector3i(floori(from.x), floori(from.y), floori(from.z))
+	if is_solid(cell):
+		return {"cell": cell, "normal": Vector3i.UP, "point": from}
+	var step_x := 0
+	var step_y := 0
+	var step_z := 0
+	var t_max_x := INF
+	var t_max_y := INF
+	var t_max_z := INF
+	var t_delta_x := INF
+	var t_delta_y := INF
+	var t_delta_z := INF
+	if dir.x > 0.0:
+		step_x = 1
+		t_delta_x = 1.0 / dir.x
+		t_max_x = (float(cell.x + 1) - from.x) / dir.x
+	elif dir.x < 0.0:
+		step_x = -1
+		t_delta_x = -1.0 / dir.x
+		t_max_x = (float(cell.x) - from.x) / dir.x
+	if dir.y > 0.0:
+		step_y = 1
+		t_delta_y = 1.0 / dir.y
+		t_max_y = (float(cell.y + 1) - from.y) / dir.y
+	elif dir.y < 0.0:
+		step_y = -1
+		t_delta_y = -1.0 / dir.y
+		t_max_y = (float(cell.y) - from.y) / dir.y
+	if dir.z > 0.0:
+		step_z = 1
+		t_delta_z = 1.0 / dir.z
+		t_max_z = (float(cell.z + 1) - from.z) / dir.z
+	elif dir.z < 0.0:
+		step_z = -1
+		t_delta_z = -1.0 / dir.z
+		t_max_z = (float(cell.z) - from.z) / dir.z
+	var normal := Vector3i.ZERO
+	var t := 0.0
+	while t <= dist:
+		if t_max_x < t_max_y and t_max_x < t_max_z:
+			cell.x += step_x
+			t = t_max_x
+			t_max_x += t_delta_x
+			normal = Vector3i(-step_x, 0, 0)
+		elif t_max_y < t_max_z:
+			cell.y += step_y
+			t = t_max_y
+			t_max_y += t_delta_y
+			normal = Vector3i(0, -step_y, 0)
+		else:
+			cell.z += step_z
+			t = t_max_z
+			t_max_z += t_delta_z
+			normal = Vector3i(0, 0, -step_z)
+		if t > dist:
+			break
+		if is_solid(cell):
+			return {"cell": cell, "normal": normal, "point": from + dir * t}
+	return {}

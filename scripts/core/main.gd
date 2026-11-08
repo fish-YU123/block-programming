@@ -514,8 +514,9 @@ func _physics_process(delta: float) -> void:
 			controller.set_orders(orders_for(self_unit.global_position))
 			controller.set_peace(peace_left)
 		controller.tick(delta)
+	# 武器：发育时间里也能挖方块（只对单位断伤）；贴身钻头战斗只在开打后结算
+	_process_weapons(delta)
 	if not in_peace():
-		_process_weapons(delta)
 		_process_combat(delta)
 	_purge_dead()
 	_check_victory()
@@ -566,9 +567,7 @@ var _block_damage: Dictionary = {}
 
 
 func _process_weapons(delta: float) -> void:
-	# 发育时间内激光和炮都停火
-	if in_peace():
-		return
+	# 发育时间内只禁「打单位」，激光挖方块照常（不然发育期没法挖矿攒资源）
 	for entry in units:
 		var u: RigidBody3D = entry["unit"]
 		if not u.alive:
@@ -596,7 +595,7 @@ func _resolve_laser(u: RigidBody3D, delta: float) -> void:
 		block_t = from.distance_to(block_hit["point"])
 		block_cell = block_hit["cell"]
 		limit = block_t
-	var unit_hit: Dictionary = _unit_ray_hit(u, from, dir, limit)
+	var unit_hit: Dictionary = {} if in_peace() else _unit_ray_hit(u, from, dir, limit)
 	if not unit_hit.is_empty():
 		end = unit_hit["point"]
 		var victim: RigidBody3D = unit_hit["unit"]
@@ -622,9 +621,6 @@ func _on_block_dug(unit: RigidBody3D, cell: Vector3i, block_id: int) -> void:
 
 ## 炮弹命中结算：沿射击方向找第一个碰到的方块/单位
 func _on_gun_fired(u: RigidBody3D, from: Vector3, dir: Vector3) -> void:
-	# 发育时间内炮也停火（单位代码还在打，但不结算伤害）
-	if in_peace():
-		return
 	var max_len: float = u.gun_reach
 	var end: Vector3 = from + dir * max_len
 	var block_hit: Dictionary = world.raycast(from, end) if world != null else {}
@@ -633,7 +629,7 @@ func _on_gun_fired(u: RigidBody3D, from: Vector3, dir: Vector3) -> void:
 	if not block_hit.is_empty():
 		limit = from.distance_to(block_hit["point"])
 		block_cell = block_hit["cell"]
-	var unit_hit: Dictionary = _unit_ray_hit(u, from, dir, limit)
+	var unit_hit: Dictionary = {} if in_peace() else _unit_ray_hit(u, from, dir, limit)
 	if not unit_hit.is_empty():
 		end = unit_hit["point"]
 		var victim: RigidBody3D = unit_hit["unit"]
