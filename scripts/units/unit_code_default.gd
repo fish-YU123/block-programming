@@ -173,14 +173,17 @@ def 高度目标():
 
 
 ## 车车（地面车）的默认代码：朝目标开过去，到了就钻
-const BLUE_SOURCE := """# 蓝方指挥官 AI：开局造矿机 / 组装厂 / 充电站，靠经济滚雪球压死对面
+const COMMANDER_SOURCE := """# 指挥官 AI（蓝红双方共用，按 team 自动分左右）：开局造矿机 / 组装厂 / 充电站，靠经济滚雪球压死对面
 # start() 跑一次；loop() 每秒 60 行预算里反复跑
 # 传感器：pos vel energy hp hp_ratio team peace res enemies below heights blocks
 # 指令：build_here(建筑id) 在自己旁边找平地盖；build(建筑id, x, y, z) 指定格子
 #       set_velocity(x, z) set_altitude(y) drill laser shoot set_tilt set_rcs
 
 def start():
-    print("蓝方指挥官上线，地面高度 ", heights[2][2])
+    if team == 0:
+        print("蓝方指挥官上线，地面高度 ", heights[2][2])
+    else:
+        print("红方指挥官上线，地面高度 ", heights[2][2])
     mem["已建"] = 0
     mem["方向"] = 1
 

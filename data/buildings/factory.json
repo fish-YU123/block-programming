@@ -1,7 +1,7 @@
 {
   "id": "factory",
   "display_name": "组装厂",
-  "kind": "factory",
+  "build_seconds": 10.0, "kind": "factory",
   "size": [3, 3, 3],
   "cost": {"copper": 40, "coal": 30},
   "period": 18.0,

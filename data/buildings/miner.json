@@ -1,7 +1,7 @@
 {
   "id": "miner",
   "display_name": "采矿机",
-  "kind": "miner",
+  "build_seconds": 10.0, "kind": "miner",
   "size": [3, 2, 3],
   "cost": {"copper": 20, "coal": 10},
   "period": 1.2,

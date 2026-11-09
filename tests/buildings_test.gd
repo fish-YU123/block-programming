@@ -69,6 +69,11 @@ func _process(_delta: float) -> bool:
 
 	var miner_entry: Dictionary = _main.buildings[0]
 	var miner = miner_entry["node"]
+	# 建造要花时间：刚放下时应该在施工中
+	_record("刚放下时在施工", miner.is_under_construction(), "剩余 %.1f 秒" % miner.build_left)
+	_record("施工中模型是矮的", miner.scale.y < 0.6, "%.2f" % miner.scale.y)
+	_main._tick_buildings(11.0)
+	_record("10 秒后建好", not miner.is_under_construction() and is_equal_approx(miner.scale.y, 1.0))
 
 	# 3) 矿机在脚下放一块铜矿，应当挖掉并进账
 	var center: Vector3i = miner.center_cell()
@@ -91,6 +96,9 @@ func _process(_delta: float) -> bool:
 	var spot2 := _flat_spot(60, 128)
 	var err4: String = _main.place_building_at("factory", spot2)
 	_record("放下组装厂", err4 == "", err4)
+	var factory_node = _main.buildings[_main.buildings.size() - 1]["node"]
+	factory_node.build_left = 0.0
+	factory_node._update_build_progress()
 	var units_before: int = _main.units.size()
 	var copper_pre: int = economy.amount("copper")
 	_main._tick_buildings(19.0)
@@ -117,6 +125,10 @@ func _process(_delta: float) -> bool:
 	if charger_base != Vector3i(-1, -1, -1):
 		var charger_err: String = _main.place_building_at("charger", charger_base, 0)
 		_record("充电站能放置", charger_err == "", charger_err)
+		if _main.buildings.size() > 0:
+			var cn = _main.buildings[_main.buildings.size() - 1]["node"]
+			cn.build_left = 0.0
+			cn._update_build_progress()
 		var unit = _main.team_units(0)[0]["unit"]
 		unit.global_position = _main.buildings[-1]["node"].center_world() + Vector3(3.0, 0.0, 0.0)
 		unit.energy_j = 1000.0

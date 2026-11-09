@@ -11,6 +11,8 @@ var size := Vector3i(3, 2, 3)
 var period := 1.0
 var timer := 0.0
 var produced := 0      ## 已经产出多少个东西（单位或矿石）
+var build_total := 10.0  ## 建造需要多少秒
+var build_left := 0.0    ## 还剩多少秒建完（>0 表示还在施工）
 
 var world = null
 
@@ -28,8 +30,11 @@ func setup(world_ref, definition: Dictionary, at_cell: Vector3i, team_id: int) -
 	var raw: Array = definition.get("size", [3, 2, 3])
 	size = Vector3i(int(raw[0]), int(raw[1]), int(raw[2]))
 	period = maxf(float(definition.get("period", 1.0)), 0.01)
+	build_total = maxf(float(definition.get("build_seconds", 10.0)), 0.0)
+	build_left = build_total
 	position = Vector3(base_cell) + Vector3(0.5, 0.0, 0.5)
 	_build_visual()
+	_update_build_progress()
 
 
 func _build_visual() -> void:
@@ -203,6 +208,19 @@ func _build_visual() -> void:
 	body.add_child(shape)
 	body.position = Vector3(0.0, sy * 0.5, 0.0)
 	add_child(body)
+
+
+## 施工中：从地基往上"长"出来，建完恢复原尺寸
+func _update_build_progress() -> void:
+	if build_total <= 0.0:
+		scale = Vector3.ONE
+		return
+	var progress: float = clampf(1.0 - build_left / build_total, 0.0, 1.0)
+	scale = Vector3(1.0, 0.12 + 0.88 * progress, 1.0)
+
+
+func is_under_construction() -> bool:
+	return build_left > 0.0
 
 
 func _process(delta: float) -> void:

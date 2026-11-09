@@ -12,6 +12,7 @@ const UnitController = preload("res://scripts/units/unit_controller.gd")
 const DefaultCode = preload("res://scripts/units/unit_code_default.gd")
 const CodePanel = preload("res://scripts/ui/code_panel.gd")
 const Economy = preload("res://scripts/economy/economy.gd")
+## 两方各一套资源账（玩家看的是蓝方的 economy）
 const Production = preload("res://scripts/economy/production.gd")
 const BuildingDB = preload("res://scripts/buildings/building_db.gd")
 const Building = preload("res://scripts/buildings/building.gd")
@@ -45,6 +46,7 @@ var _world_ready_shown := false
 ## 地形没建完之前不开始游戏：不生成单位、不响应操作、物理也不跑
 var _world_ready := false
 var economy: Economy
+var economy_red: Economy
 var production: Production
 var building_db: BuildingDB
 ## 已有的建筑：{def_id, node, team, kind, timer}
@@ -80,7 +82,7 @@ var units_root: Node3D
 var buildings_root: Node3D
 ## 预设单位 + 玩家代码（现在还没有编辑器，先用默认代码）
 const MAX_UNITS := 20
-const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.BLUE_SOURCE}]
+const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.COMMANDER_SOURCE}]
 
 ## 玩家标记的施工/挖掘指令（虚影）：{x, y, z, action, id}
 ## action：mine 挖一格 / place 放方块 / build 造建筑 / remove 拆建筑
@@ -146,6 +148,8 @@ func _ready() -> void:
 
 	economy = Economy.new()
 	economy.setup(db, STARTING_RESOURCES)
+	economy_red = Economy.new()
+	economy_red.setup(db, STARTING_RESOURCES)
 	production = Production.new()
 	production.setup(economy)
 	# 一个示例配方：3 煤 + 1 铜 → 30 秒产 1 块「电池」（M4 先打通链路，具体数值后面调）
@@ -316,7 +320,7 @@ func _setup_units() -> void:
 		var red_def: Dictionary = unit_db.get_def("feifei")
 		if red_def.is_empty():
 			break
-		_spawn_unit(red_def, Vector3(float(spec["x"]), 0.0, float(spec["z"])), DefaultCode.FIGHTER_SOURCE, TEAM_RED)
+		_spawn_unit(red_def, Vector3(float(spec["x"]), 0.0, float(spec["z"])), DefaultCode.COMMANDER_SOURCE, TEAM_RED)
 
 
 ## 按单位表里的 id 造对应的节点：车车是地面车，其余默认飞飞
@@ -337,7 +341,7 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 	# 蓝方面朝 +X、红方面朝 -X
 	unit.rotation.y = -PI * 0.5 if team == TEAM_BLUE else PI * 0.5
 	var controller := UnitController.new()
-	controller.is_leader = team == TEAM_BLUE and team_units(TEAM_BLUE).is_empty()
+	controller.is_leader = team_units(team).is_empty()
 	controller.build_provider = func(def_id: String, cell: Vector3i) -> String:
 		return place_building_at(def_id, cell, team)
 	controller.build_here_provider = func(def_id: String) -> String:
@@ -345,7 +349,7 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 	unit.gun_fired.connect(_on_gun_fired)
 	unit.block_dug.connect(_on_block_dug)
 	controller.bind(unit, code, 1)
-	units.append({"uid": _next_uid, "unit": unit, "controller": controller, "code": code, "revision": 1, "team": team, "cost": economy.unit_cost(def) if economy != null else {}})
+	units.append({"uid": _next_uid, "unit": unit, "controller": controller, "code": code, "revision": 1, "team": team, "cost": _economy_for(team).unit_cost(def) if economy != null else {}})
 	_next_uid += 1
 	unit.name = "%s_%d" % [str(def.get("id", "unit")), int(units[units.size() - 1]["uid"])]
 
@@ -380,6 +384,13 @@ func build_near(def_id: String, near: Vector3, team: int) -> String:
 					return ""
 				# 位置被占就继续往远处找
 	return "附近找不到平地"
+
+## 取某支队伍的资源账（红方也是独立的一套）
+func _economy_for(team: int):
+	if team == TEAM_RED and economy_red != null:
+		return economy_red
+	return economy
+
 
 func _cost_text(cost: Dictionary) -> String:
 	var parts: PackedStringArray = []
@@ -551,8 +562,7 @@ func _physics_process(delta: float) -> void:
 		if self_unit.alive:
 			controller.set_orders(orders_for(self_unit.global_position))
 			controller.set_peace(peace_left)
-			if economy != null:
-				controller.set_resources(economy.all())
+			controller.set_resources(_economy_for(int(entry.get("team", TEAM_BLUE))).all())
 		controller.tick(delta)
 	# 武器：发育时间里也能挖方块（只对单位断伤）；贴身钻头战斗只在开打后结算
 	_process_weapons(delta)
@@ -1022,12 +1032,12 @@ func place_building_at(def_id: String, base: Vector3i, team: int = TEAM_BLUE) ->
 	var def: Dictionary = building_db.get_def(def_id)
 	var cost: Dictionary = building_db.cost_of(def_id)
 	var size: Vector3i = building_db.size_of(def_id)
-	if not economy.can_afford(cost):
+	if not _economy_for(team).can_afford(cost):
 		return "资源不足：%s" % _cost_text(cost)
 	var check := _building_placement(base, team, size)
 	if not check["ok"]:
 		return str(check["reason"])
-	economy.spend(cost)
+	_economy_for(team).spend(cost)
 	var node := Building.new()
 	node.name = "building_%d" % (buildings.size() + 1)
 	buildings_root.add_child(node)
@@ -1043,7 +1053,7 @@ func _remove_last_building() -> void:
 	var entry: Dictionary = buildings.pop_back()
 	var node = entry["node"]
 	node.queue_free()
-	economy.refund(entry["cost"])
+	_economy_for(int(entry.get("team", TEAM_BLUE))).refund(entry["cost"])
 	hud.show_message("拆掉一栋建筑，资源已退回")
 
 
@@ -1051,6 +1061,11 @@ func _tick_buildings(delta: float) -> void:
 	for entry in buildings:
 		var node = entry["node"]
 		if not is_instance_valid(node):
+			continue
+		# 还在施工（默认 10 秒）不产出：进度按物理帧推进
+		if node.build_left > 0.0:
+			node.build_left = maxf(0.0, node.build_left - delta)
+			node._update_build_progress()
 			continue
 		entry["timer"] = float(entry["timer"]) + delta
 		var def: Dictionary = building_db.get_def(str(entry["id"]))
@@ -1091,9 +1106,9 @@ func _mine_with(node, def: Dictionary) -> void:
 				if block_id == bedrock:
 					break
 				# 只挖值钱的矿（煤/铜/铁/金），泥土石头这类不掉资源的跳过
-				if not MINER_DROPS.has(economy.drop_of(block_id)):
+				if not MINER_DROPS.has(_economy_for(int(node.team)).drop_of(block_id)):
 					continue
-				var drop := economy.mine_block(block_id)
+				var drop := _economy_for(int(node.team)).mine_block(block_id)
 				world.set_block(cell, BlockDB.AIR)
 				node.produced += 1
 				if drop != "":
@@ -1132,10 +1147,11 @@ func _produce_unit(node) -> void:
 		return
 	if units.size() >= MAX_UNITS:
 		return
-	var cost: Dictionary = economy.unit_cost(unit_def)
-	if not economy.can_afford(cost):
+	var team_economy = _economy_for(int(node.team))
+	var cost: Dictionary = team_economy.unit_cost(unit_def)
+	if not team_economy.can_afford(cost):
 		return
-	economy.spend(cost)
+	team_economy.spend(cost)
 	var point: Vector3 = node.spawn_point()
 	_spawn_unit(unit_def, point, _preset_code_for(int(node.team)), int(node.team))
 	node.produced += 1
@@ -1144,7 +1160,7 @@ func _produce_unit(node) -> void:
 
 ## 各队伍的预设代码：蓝方是"指挥官"AI（造建筑 + 滚雪球），红方是简单的战斗 AI
 func _preset_code_for(team: int) -> String:
-	return DefaultCode.BLUE_SOURCE if team == TEAM_BLUE else DefaultCode.FIGHTER_SOURCE
+	return DefaultCode.COMMANDER_SOURCE
 
 
 func team_units(team: int) -> Array:
@@ -1549,7 +1565,7 @@ func _remove_last_unit() -> void:
 	var node: Node3D = entry["unit"]
 	node.queue_free()
 	if entry.has("cost"):
-		economy.refund(entry["cost"])
+		_economy_for(int(entry.get("team", TEAM_BLUE))).refund(entry["cost"])
 	hud.show_message("收回一台飞飞（剩 %d 台）" % units.size())
 	_refresh_hud()
 

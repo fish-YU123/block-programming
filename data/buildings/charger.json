@@ -1,7 +1,7 @@
 {
   "id": "charger",
   "display_name": "充电站",
-  "kind": "charger",
+  "build_seconds": 10.0, "kind": "charger",
   "size": [2, 3, 2],
   "cost": {"copper": 30, "iron": 10},
   "period": 0.5,
