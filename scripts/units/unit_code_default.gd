@@ -185,6 +185,7 @@ def start():
     else:
         print("红方指挥官上线，地面高度 ", heights[2][2])
     mem["已建"] = 0
+    mem["等"] = 0.0
     mem["方向"] = 1
 
 def loop():
@@ -209,29 +210,37 @@ def 建设():
     # 只有指挥官负责盖楼，其他单位专心打仗（否则每个单位都乱花资源）
     if leader == 0:
         return
+    # 上一栋还在施工（10 秒）就先别动，让建筑一栋一栋拔地而起
+    if t < mem["等"]:
+        return
     # 建造顺序：矿机 → 两座组装厂 → (攒钱) → 再加组装厂 / 充电站
     if mem["已建"] == 0:
         if res["copper"] >= 20 and res["coal"] >= 10:
             if build_here("miner") == "":
                 mem["已建"] = 1
+                mem["等"] = t + 11.0
                 print("矿机就位")
     elif mem["已建"] == 1:
         if res["copper"] >= 40 and res["coal"] >= 30:
             if build_here("factory") == "":
                 mem["已建"] = 2
+                mem["等"] = t + 11.0
                 print("组装厂一号就位")
     elif mem["已建"] == 2:
         if res["copper"] >= 40 and res["coal"] >= 30:
             if build_here("factory") == "":
                 mem["已建"] = 3
+                mem["等"] = t + 11.0
                 print("组装厂二号就位，两座一起造飞飞")
     else:
         # 铜优先留给定产，攒够了才盖充电站 / 新工厂
         if res["copper"] >= 200 and res["coal"] >= 80:
             if build_here("factory") == "":
+                mem["等"] = t + 11.0
                 print("再盖一座组装厂")
         elif res["copper"] >= 150 and res["iron"] >= 10:
             if build_here("charger") == "":
+                mem["等"] = t + 11.0
                 print("充电站就位")
 
 def 进攻():

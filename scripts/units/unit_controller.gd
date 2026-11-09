@@ -122,6 +122,8 @@ func last_error() -> String:
 	return _last_error
 
 
+var _elapsed := 0.0  ## 这个单位开机以来过了多少秒（给 AI 计时用）
+
 func tick(delta: float) -> void:
 	if unit == null or _vm == null:
 		return
@@ -129,6 +131,7 @@ func tick(delta: float) -> void:
 		_apply_idle_controls()
 		unit.runtime_error = _last_error
 		return
+	_elapsed += delta
 	_inject_sensors(false)
 	_budget += delta * LINES_PER_SECOND
 	var steps := mini(int(_budget), MAX_STEPS_PER_FRAME)
@@ -265,6 +268,7 @@ func _inject_sensors(refresh_lists: bool) -> void:
 		"below": _list_snapshot.get("below", {}),
 		"moving": unit.moving,
 		"peace": peace_left,
+		"t": _elapsed,
 		"res": resources,
 		"leader": 1 if is_leader else 0,
 	})

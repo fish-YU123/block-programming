@@ -16,6 +16,10 @@ var build_left := 0.0    ## 还剩多少秒建完（>0 表示还在施工）
 
 var world = null
 
+## 施工时把整个楼换成半透明青色"轮廓"，建完再换回队伍材质
+var _saved_materials: Dictionary = {}
+var _construction := false
+
 ## 会转的部件：钻头（采矿机）、吊臂（组装厂）
 var _drill_bit: MeshInstance3D = null
 var _crane: Node3D = null
@@ -216,7 +220,37 @@ func _update_build_progress() -> void:
 		scale = Vector3.ONE
 		return
 	var progress: float = clampf(1.0 - build_left / build_total, 0.0, 1.0)
-	scale = Vector3(1.0, 0.12 + 0.88 * progress, 1.0)
+	scale = Vector3(1.0, 0.45 + 0.55 * progress, 1.0)
+	_set_construction_look(progress < 0.999)
+
+
+## 施工中的样子：半透明青色 + 发光，一眼能看出"还没建好"
+func _set_construction_look(on: bool) -> void:
+	if on == _construction:
+		return
+	_construction = on
+	if on:
+		var ghost: StandardMaterial3D = MatCache.of(Color(0.45, 0.85, 1.0), true, 0.6, true, 0.55)
+		for m in _all_meshes():
+			_saved_materials[m] = m.material_override
+			m.material_override = ghost
+	else:
+		for m in _saved_materials.keys():
+			if is_instance_valid(m):
+				m.material_override = _saved_materials[m]
+		_saved_materials.clear()
+
+
+func _all_meshes() -> Array:
+	var out: Array = []
+	var stack: Array = [self]
+	while not stack.is_empty():
+		var node = stack.pop_back()
+		if node is MeshInstance3D:
+			out.append(node)
+		for child in node.get_children():
+			stack.append(child)
+	return out
 
 
 func is_under_construction() -> bool:
