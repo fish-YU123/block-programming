@@ -5,6 +5,7 @@ extends RigidBody3D
 
 const BlockDB = preload("res://scripts/world/block_db.gd")
 const MatCache = preload("res://scripts/core/mat_cache.gd")
+const StatusBadges = preload("res://scripts/ui/status_badges.gd")
 
 ## 炮管开火（主场景据此结算命中与伤害）
 signal gun_fired(unit, from: Vector3, direction: Vector3)
@@ -75,6 +76,7 @@ var _radar_dome: MeshInstance3D
 var _rcs_jets: Array = []
 var _anim_time := 0.0
 var _gun_kick := 0.0
+var _badge: Sprite3D = null      ## 头顶状态图标（没电等）
 var _barrel: MeshInstance3D
 var _drill_cd := 0.0
 var _gun_cd := 0.0
@@ -135,6 +137,7 @@ func setup(world_node: Node3D, def: Dictionary) -> void:
 	collision_layer = 2
 	collision_mask = 1
 	_build_visual()
+	_badge = StatusBadges.make_sprite(self, Vector3(0.0, unit_size + 0.45, 0.0))
 
 
 # ---------------------------------------------------------------- 物理
@@ -311,9 +314,21 @@ func _physics_process(delta: float) -> void:
 		_drill_once()
 
 	_animate(delta)
+	_update_badge()
 
 
 ## 纯视觉动画：尾焰抖动、雷达罩扫描、RCS 呼吸、开炮后坐
+## 头顶状态图标：现在只有「没电」一种
+func _update_badge() -> void:
+	if _badge == null:
+		return
+	var no_power: bool = alive and (energy_out or energy_j <= energy_max * 0.08)
+	StatusBadges.set_kind(_badge, StatusBadges.Kind.NO_POWER if no_power else StatusBadges.Kind.NONE)
+	if no_power:
+		var bob := sin(_anim_time * 3.0) * 0.05
+		_badge.position = Vector3(0.0, unit_size + 0.45 + bob, 0.0)
+
+
 func _animate(delta: float) -> void:
 	_anim_time += delta
 	if _flame != null:

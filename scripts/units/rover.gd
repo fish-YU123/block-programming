@@ -6,6 +6,7 @@ extends RigidBody3D
 
 const BlockDB = preload("res://scripts/world/block_db.gd")
 const MatCache = preload("res://scripts/core/mat_cache.gd")
+const StatusBadges = preload("res://scripts/ui/status_badges.gd")
 const PathFinder = preload("res://scripts/world/path_finder.gd")
 
 signal gun_fired(unit, from: Vector3, direction: Vector3)
@@ -29,6 +30,7 @@ var team := 0
 var max_hp := 320.0
 var hp := 320.0
 var alive := true
+var _badge: Sprite3D = null
 
 var max_speed := 9.0
 var drive_force := 2600.0
@@ -104,6 +106,7 @@ func setup(world_ref: Node3D, def: Dictionary) -> void:
 	collision_mask = 1 | 4
 	_apply_physics_material()
 	_build_visual()
+	_badge = StatusBadges.make_sprite(self, Vector3(0.0, unit_size + 0.5, 0.0))
 	_reset_controls()
 
 
@@ -123,6 +126,16 @@ func _reset_controls() -> void:
 
 
 # ---------------------------------------------------------------- 物理与驾驶
+
+## 头顶状态图标：没电时显示闪电
+func _update_badge() -> void:
+	if _badge == null:
+		return
+	var no_power: bool = alive and (energy_out or energy_j <= energy_max * 0.08)
+	StatusBadges.set_kind(_badge, StatusBadges.Kind.NO_POWER if no_power else StatusBadges.Kind.NONE)
+	if no_power:
+		_badge.position = Vector3(0.0, unit_size + 0.5 + sin(Time.get_ticks_msec() * 0.003) * 0.05, 0.0)
+
 
 func _physics_process(delta: float) -> void:
 	if not alive:
@@ -165,6 +178,8 @@ func _physics_process(delta: float) -> void:
 	if bool(controls.get("drill", false)) and _drill_cd <= 0.0 and energy_j > 0.0:
 		_drill_cd = drill_cooldown
 		_drill_once()
+
+	_update_badge()
 
 	# 卡进方块里就往上抬一点（防止掉进未生成的地面）
 	if world != null:

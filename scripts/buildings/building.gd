@@ -1,6 +1,7 @@
 extends Node3D
 const MatCache = preload("res://scripts/core/mat_cache.gd")
 const ConstructionShader = preload("res://shaders/construction.gdshader")
+const StatusBadges = preload("res://scripts/ui/status_badges.gd")
 ## 一栋建筑：一个占方格的方块体，带队伍颜色和碰撞体。
 ## 具体行为（采矿 / 产单位）由 main 每帧按 kind 驱动。
 
@@ -24,6 +25,7 @@ var _construction := false
 var _unsupported := false
 var _blocked := false            ## 占地体积被方块占住了（盖在石头里 / 后来被填上）
 var _construction_mat: ShaderMaterial = null
+var _badge: Sprite3D = null      ## 屋顶状态图标（地基不牢 / 被埋）
 
 ## 会转的部件：钻头（采矿机）、吊臂（组装厂）
 var _drill_bit: MeshInstance3D = null
@@ -49,7 +51,9 @@ func setup(world_ref, definition: Dictionary, at_cell: Vector3i, team_id: int) -
 	build_left = build_total
 	position = Vector3(base_cell) + Vector3(0.5, 0.0, 0.5)
 	_build_visual()
+	_badge = StatusBadges.make_sprite(self, Vector3(0.0, float(size.y) + 0.9, 0.0))
 	_update_build_progress()
+	_refresh_badge()
 
 
 func _build_visual() -> void:
@@ -235,6 +239,7 @@ func _update_build_progress() -> void:
 		return
 	var progress: float = clampf(1.0 - build_left / build_total, 0.0, 1.0)
 	_set_construction_look(progress < 0.999)
+	_refresh_badge()
 	if _construction and _construction_mat != null:
 		# base_cell.y 是建筑底面所在格，顶面 = base_cell.y + size.y
 		var base_y: float = float(base_cell.y)
@@ -259,6 +264,7 @@ func set_blocked_look(on: bool) -> void:
 		return
 	_blocked = on
 	_apply_strike_look(_blocked or _unsupported)
+	_refresh_badge()
 
 
 func is_blocked() -> bool:
@@ -309,10 +315,28 @@ func set_unsupported_look(on: bool) -> void:
 		return
 	_unsupported = on
 	_apply_strike_look(_blocked or _unsupported)
+	_refresh_badge()
 
 
 func is_unsupported() -> bool:
 	return _unsupported
+
+
+## 屋顶图标：施工中不显示；罢工时按原因显示「地基不牢」或「被埋住」
+func _refresh_badge() -> void:
+	if _badge == null:
+		return
+	var kind: int = StatusBadges.Kind.NONE
+	if is_under_construction():
+		kind = StatusBadges.Kind.NONE
+	elif _blocked:
+		kind = StatusBadges.Kind.BURIED
+	elif _unsupported:
+		kind = StatusBadges.Kind.FOUNDATION
+	StatusBadges.set_kind(_badge, kind)
+	if kind != StatusBadges.Kind.NONE:
+		var bob := sin(_anim_t * 3.0) * 0.06
+		_badge.position = Vector3(0.0, float(size.y) + 0.9 + bob, 0.0)
 
 
 func _all_meshes() -> Array:
@@ -345,6 +369,8 @@ func _spawn_smoke() -> void:
 
 func _animate(delta: float) -> void:
 	_anim_t += delta
+	if _badge != null and _badge.visible:
+		_refresh_badge()
 	# 烟囱冒烟
 	if _smoke_anchor != Vector3.ZERO and not is_under_construction():
 		_smoke_t -= delta
