@@ -85,8 +85,8 @@ func _initialize() -> void:
 	var feifei := unit_db.get_def("feifei")
 	_record("飞飞定义有 cost", not feifei.is_empty() and feifei.has("cost"))
 	var cost := econ.unit_cost(feifei)
-	_record("飞飞造价 = {copper:25, coal:10}",
-		cost == {"copper": 25, "coal": 10}, str(cost))
+	_record("飞飞造价 = {copper:18, coal:8}",
+		cost == {"copper": 18, "coal": 8}, str(cost))
 	_record("unit_cost 缺省为空表", econ.unit_cost({}) == {})
 
 	# —— 生产建筑 ——

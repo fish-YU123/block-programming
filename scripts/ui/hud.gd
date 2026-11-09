@@ -12,8 +12,26 @@ var resources_label: Label
 var overlay_label: Label
 var loading_label: Label
 var peace_label: Label
+var left_panel: PanelContainer
+var right_panel: PanelContainer
+var hint_panel: PanelContainer
+var peace_bar: ProgressBar
 var _loading_bg: ColorRect
 var _message_timer := 0.0
+
+
+## 统一的 HUD 底板：半透明深色 + 圆角 + 细边
+func _make_panel() -> PanelContainer:
+	var panel := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.03, 0.05, 0.09, 0.55)
+	style.border_color = Color(0.45, 0.65, 0.95, 0.35)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(10)
+	panel.add_theme_stylebox_override("panel", style)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return panel
 
 
 func _ready() -> void:
@@ -33,29 +51,42 @@ func _ready() -> void:
 	crosshair.add_child(v)
 	add_child(crosshair)
 
+	# 左上：单位/建筑状态 + 手持方块，套一层半透明圆角底板
+	left_panel = _make_panel()
+	left_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	left_panel.position = Vector2(12, 10)
+	add_child(left_panel)
+	var left_box := VBoxContainer.new()
+	left_box.add_theme_constant_override("separation", 2)
+	left_panel.add_child(left_box)
 	info_label = Label.new()
-	info_label.position = Vector2(16, 12)
-	info_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.8))
-	add_child(info_label)
-
-	resources_label = Label.new()
-	resources_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	resources_label.position = Vector2(-320, 12)
-	resources_label.add_theme_color_override("font_color", Color(0.95, 0.9, 0.6, 0.95))
-	add_child(resources_label)
-
+	info_label.add_theme_color_override("font_color", Color(0.92, 0.96, 1.0, 0.95))
+	left_box.add_child(info_label)
 	block_label = Label.new()
-	block_label.position = Vector2(16, 62)
-	block_label.add_theme_color_override("font_color", Color(0.9, 0.95, 0.7, 0.9))
-	add_child(block_label)
+	block_label.add_theme_color_override("font_color", Color(0.9, 0.95, 0.7, 0.92))
+	left_box.add_child(block_label)
 
+	# 右上：资源
+	right_panel = _make_panel()
+	right_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	right_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	right_panel.position = Vector2(-12, 10)
+	add_child(right_panel)
+	resources_label = Label.new()
+	resources_label.add_theme_color_override("font_color", Color(0.98, 0.92, 0.62, 0.96))
+	right_panel.add_child(resources_label)
+
+	# 左下：操作提示
+	hint_panel = _make_panel()
+	hint_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	hint_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	hint_panel.position = Vector2(12, -12)
+	add_child(hint_panel)
 	hint_label = Label.new()
-	hint_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	hint_label.position = Vector2(16, -54)
-	hint_label.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	hint_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.65))
+	hint_label.add_theme_color_override("font_color", Color(0.86, 0.92, 1.0, 0.8))
+	hint_label.add_theme_font_size_override("font_size", 13)
 	hint_label.text = "WASD 移动 / 空格上升 / Shift 下降 / ⌘ 加速 / 滚轮调视野\n按住左键拖动转视角 / 单击左键标记挖掘 / 右键标记放置\n数字键 1-8 选方块 / Q 切换建筑 / B 标记建造 / N 标记拆除\nT 切换单位 / F 放置 / G 收回 / C 代码面板（标记只是虚影，由单位代码执行）"
-	add_child(hint_label)
+	hint_panel.add_child(hint_label)
 
 	loading_label = Label.new()
 	loading_label.set_anchors_preset(Control.PRESET_CENTER)
@@ -71,6 +102,18 @@ func _ready() -> void:
 	peace_label.add_theme_constant_override("shadow_offset_y", 2)
 	peace_label.text = ""
 	add_child(peace_label)
+
+	# 发育期进度条（贴在倒计时文字下面）
+	peace_bar = ProgressBar.new()
+	peace_bar.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	peace_bar.position = Vector2(-210, 54)
+	peace_bar.size = Vector2(420, 6)
+	peace_bar.max_value = 1.0
+	peace_bar.value = 0.0
+	peace_bar.show_percentage = false
+	peace_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	peace_bar.visible = false
+	add_child(peace_bar)
 
 	_loading_bg = ColorRect.new()
 	_loading_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -134,7 +177,7 @@ func set_info(text: String) -> void:
 func set_loading_mode(on: bool) -> void:
 	if _loading_bg != null:
 		_loading_bg.visible = on
-	for node in [info_label, block_label, hint_label, resources_label, message_label, crosshair, peace_label]:
+	for node in [left_panel, right_panel, hint_panel, message_label, crosshair, peace_label, peace_bar]:
 		if node != null:
 			node.visible = not on
 	if loading_label != null and not on:
@@ -142,7 +185,11 @@ func set_loading_mode(on: bool) -> void:
 
 
 ## 开局发育倒计时（空串则隐藏）
-func set_peace(text: String) -> void:
+func set_peace(text: String, ratio := -1.0) -> void:
+	if peace_bar != null:
+		peace_bar.visible = ratio >= 0.0
+		if ratio >= 0.0:
+			peace_bar.value = clampf(ratio, 0.0, 1.0)
 	if peace_label != null:
 		peace_label.text = text
 

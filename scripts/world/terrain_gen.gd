@@ -104,14 +104,14 @@ func block_at_height(x: int, y: int, z: int, h: int) -> int:
 	if y == h - 4 and h <= 20:
 		return id_sand
 	var roll := _hash01(x, y, z)
-	if roll < 0.018:
+	if roll < 0.060:
 		return id_coal
-	if y <= h - 6 and roll < 0.032:
+	if y <= h - 6 and roll < 0.100:
 		return id_copper
 	# 铁矿更深一些，金矿最深也最少
-	if id_iron != 0 and y <= h - 10 and roll < 0.045:
+	if id_iron != 0 and y <= h - 10 and roll < 0.130:
 		return id_iron
-	if id_gold != 0 and y <= h - 16 and roll < 0.051:
+	if id_gold != 0 and y <= h - 16 and roll < 0.150:
 		return id_gold
 	return id_stone
 

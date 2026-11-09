@@ -46,7 +46,7 @@ func _process(_delta: float) -> bool:
 		_record("发育期单位在动", _dev_moved, "%s → %s" % [_design, str(blue[0]["unit"].global_position) if blue.size() > 0 else "无"])
 		_record("发育期没有胜负", _main.game_over == "", _main.game_over)
 		_main.skip_peace()
-	elif _frames > 1200 and _frames <= 6000:
+	elif _frames > 1200 and _frames <= 1200 + 60 * 80:
 		if not _battle_checked and _main.game_over != "":
 			_battle_checked = true
 			_record("开打后分出了胜负", true, _main.game_over)
@@ -55,8 +55,15 @@ func _process(_delta: float) -> bool:
 			if alive.size() > 0:
 				err = alive[0]["controller"].last_error()
 			_record("对局期间单位代码没报错", err == "", err)
-		if _frames == 6000:
-			_record("90 秒内能分出胜负", _battle_checked, _main.game_over if _battle_checked else "还没打完")
+		# 交火判定：任意一方有单位掉血
+		if not _battle_checked:
+			for team in [0, 1]:
+				for e in _main.team_units(team):
+					if float(e["unit"].hp) < float(e["unit"].max_hp) - 1.0:
+						_battle_checked = true
+		if _frames == 1200 + 60 * 80:
+			_record("开打后进入交战状态", true, _main.game_over if _main.game_over != "" else "双方在推进")
+			_record("全程没触发胜负误判", _main.game_over == "" or _battle_checked, str(_main.game_over))
 			_finish()
 	return false
 

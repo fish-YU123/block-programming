@@ -70,6 +70,12 @@ var drill_hits := 0
 var thrust_now := 0.0
 
 var _nozzle: Node3D
+var _flame: MeshInstance3D
+var _radar_dome: MeshInstance3D
+var _rcs_jets: Array = []
+var _anim_time := 0.0
+var _gun_kick := 0.0
+var _barrel: MeshInstance3D
 var _drill_cd := 0.0
 var _gun_cd := 0.0
 var _beam: MeshInstance3D
@@ -259,6 +265,7 @@ func _physics_process(delta: float) -> void:
 		_gun_cd = gun_cooldown
 		energy_j = maxf(0.0, energy_j - gun_energy_j)
 		shots_fired += 1
+		_gun_kick = 1.0
 		_fire_gun_once()
 	else:
 		_gun_cd = maxf(0.0, _gun_cd - 0.0)
@@ -302,6 +309,28 @@ func _physics_process(delta: float) -> void:
 	if drilling and _drill_cd <= 0.0:
 		_drill_cd = drill_cooldown
 		_drill_once()
+
+	_animate(delta)
+
+
+## 纯视觉动画：尾焰抖动、雷达罩扫描、RCS 呼吸、开炮后坐
+func _animate(delta: float) -> void:
+	_anim_time += delta
+	if _flame != null:
+		var lift: float = clampf(float(controls.get("lift", 0.0)), 0.0, 1.0)
+		var flicker: float = 1.0 + 0.12 * sin(_anim_time * 38.0) + 0.05 * sin(_anim_time * 71.0)
+		_flame.scale = Vector3(1.0, (0.45 + 0.85 * lift) * flicker, 1.0)
+		_flame.visible = energy_j > 0.0 and lift > 0.02
+	if _radar_dome != null:
+		_radar_dome.rotation.y += delta * 2.4
+	for jet in _rcs_jets:
+		if is_instance_valid(jet):
+			var k: float = 1.0 + 0.15 * sin(_anim_time * 22.0 + float(jet.get_index()))
+			jet.scale = Vector3(k, 1.0, k)
+	if _gun_kick > 0.0:
+		_gun_kick = maxf(0.0, _gun_kick - delta * 6.0)
+		if _barrel != null:
+			_barrel.position.z = -0.42 * (1.0 - 0.12 * _gun_kick)
 
 
 ## 炮口/激光发射口的世界坐标（机头前上方）
@@ -542,6 +571,7 @@ func _build_visual() -> void:
 	flame.position = Vector3(0, -0.17, 0)
 	flame.material_override = glass_mat
 	_nozzle.add_child(flame)
+	_flame = flame
 
 	# 两侧 RCS 吊舱：每个吊舱前后各一个喷口
 	for side in [-1.0, 1.0]:
@@ -593,6 +623,7 @@ func _build_visual() -> void:
 	radar.position = Vector3(0, 0.1, 0.16)
 	radar.material_override = glass_mat
 	model.add_child(radar)
+	_radar_dome = radar
 
 	# 机背炮管（沿 -Z 伸出），带一小段炮尾
 	var gun_mat: StandardMaterial3D = MatCache.solid("flyer_gun", Color(0.16, 0.17, 0.2))
@@ -605,6 +636,7 @@ func _build_visual() -> void:
 	barrel.position = Vector3(0, 0.14, -0.18)
 	barrel.rotation.x = PI * 0.5
 	barrel.material_override = gun_mat
+	_barrel = barrel
 	model.add_child(barrel)
 	var muzzle := MeshInstance3D.new()
 	var muzzle_mesh := CylinderMesh.new()

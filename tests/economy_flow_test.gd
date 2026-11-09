@@ -53,8 +53,8 @@ func _check() -> void:
 	var coal_before: int = economy.amount("coal")
 	_main._place_unit()
 	_record("放置后蓝队单位数 +1", _main.team_units(0).size() == 2, str(_main.units.size()))
-	_record("放置扣铜 25", economy.amount("copper") == copper_before - 25, str(economy.amount("copper")))
-	_record("放置扣煤 10", economy.amount("coal") == coal_before - 10, str(economy.amount("coal")))
+	_record("放置扣铜 18", economy.amount("copper") == copper_before - 18, str(economy.amount("copper")))
+	_record("放置扣煤 8", economy.amount("coal") == coal_before - 8, str(economy.amount("coal")))
 
 	# 收回退款
 	_main._remove_last_unit()

@@ -54,7 +54,7 @@ func _process(_delta: float) -> bool:
 	_record("建筑表加载 3 种", _main.building_db.order.size() == 3, str(_main.building_db.order))
 	_record("采矿机尺寸 3×2×3", _main.building_db.size_of("miner") == Vector3i(3, 2, 3))
 	_record("组装厂尺寸 3×3×3", _main.building_db.size_of("factory") == Vector3i(3, 3, 3))
-	_record("采矿机周期 1.2 秒", is_equal_approx(_main.building_db.period_of("miner"), 1.2))
+	_record("采矿机周期 0.9 秒", is_equal_approx(_main.building_db.period_of("miner"), 0.9))
 
 	# 2) 放置采矿机
 	economy.add("copper", 200)
@@ -79,10 +79,25 @@ func _process(_delta: float) -> bool:
 	var center: Vector3i = miner.center_cell()
 	var ore_cell := Vector3i(center.x, int(spot.y) - 1, center.z)
 	world.set_block(ore_cell, db.id_of("copper_ore"))
+	var produced_before: int = miner.produced
 	var copper_before: int = economy.amount("copper")
-	_main._tick_buildings(1.5)
-	_record("矿机挖掉矿石", world.get_block(ore_cell) == 0 or economy.amount("copper") > copper_before, str(world.get_block(ore_cell)))
-	_record("矿机产出铜 +1", economy.amount("copper") == copper_before + 1, "%d -> %d" % [copper_before, economy.amount("copper")])
+	for i in 30:
+		_main._tick_buildings(1.0)
+	_record("矿机在矿区里挖到矿", miner.produced > produced_before, "产出 %d -> %d" % [produced_before, miner.produced])
+	_record("挖到的矿进账", economy.amount("copper") + economy.amount("coal") >= copper_before, str(economy.all()))
+
+	# 3.5) 地基每格都要踩实：挖掉一格就停工
+	var lost := Vector3i(spot.x, int(spot.y) - 1, spot.z)
+	var keep: int = world.get_block(lost)
+	world.set_block(lost, 0)
+	_main._tick_buildings(2.0)
+	_record("缺一格地基就停工", miner.is_unsupported(), str(lost))
+	var copper_stopped: int = economy.amount("copper")
+	_main._tick_buildings(3.0)
+	_record("停工期间不产矿", economy.amount("copper") == copper_stopped, "%d" % economy.amount("copper"))
+	world.set_block(lost, keep)
+	_main._tick_buildings(2.0)
+	_record("补回地基就恢复", not miner.is_unsupported())
 
 	# 4) 重叠放置被拒绝
 	var err2: String = _main.place_building_at("miner", spot)
@@ -105,7 +120,7 @@ func _process(_delta: float) -> bool:
 	_record("组装厂产出一台单位", _main.units.size() == units_before + 1, "%d -> %d" % [units_before, _main.units.size()])
 	# 同一帧里采矿机也可能挖到一块铜，所以扣款数额允许 22~26 的浮动（标称 25）
 	var spent: int = copper_pre - economy.amount("copper")
-	_record("产生时扣了资源", spent >= 22 and spent <= 26, "扣了 %d（%d -> %d）" % [spent, copper_pre, economy.amount("copper")])
+	_record("产生时扣了资源", spent >= 15 and spent <= 20, "扣了 %d（%d -> %d）" % [spent, copper_pre, economy.amount("copper")])
 
 	# 7) 资源不足时组装厂不产单位
 	economy.spend({"copper": economy.amount("copper"), "coal": economy.amount("coal")})

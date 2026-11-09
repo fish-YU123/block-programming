@@ -4,7 +4,7 @@
   "build_seconds": 10.0, "kind": "factory",
   "size": [3, 3, 3],
   "cost": {"copper": 40, "coal": 30},
-  "period": 18.0,
+  "period": 10.0,
   "unit": "feifei",
   "color": [0.95, 0.62, 0.24]
 }

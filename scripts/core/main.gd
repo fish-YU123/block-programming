@@ -584,7 +584,7 @@ func skip_peace() -> void:
 	peace_left = 0.0
 	_peace_label_seconds = -1
 	if hud != null:
-		hud.set_peace("")
+		hud.set_peace("", -1.0)
 
 
 func _tick_peace(delta: float) -> void:
@@ -593,7 +593,7 @@ func _tick_peace(delta: float) -> void:
 	peace_left = maxf(0.0, peace_left - delta)
 	if peace_left <= 0.0:
 		if hud != null:
-			hud.set_peace("")
+			hud.set_peace("", -1.0)
 			hud.show_message("发育时间结束，可以开打了", 4.0)
 		return
 	# 每秒刷新一次倒计时显示
@@ -601,7 +601,7 @@ func _tick_peace(delta: float) -> void:
 	if seconds != _peace_label_seconds:
 		_peace_label_seconds = seconds
 		if hud != null:
-			hud.set_peace("发育时间 %d 秒（双方不能互相攻击）" % seconds)
+			hud.set_peace("发育时间 %d 秒（双方不能互相攻击）" % seconds, peace_left / PEACE_SECONDS)
 
 
 var _peace_label_seconds := -1
@@ -938,6 +938,15 @@ func _building_placement(at_cell: Vector3i, team: int, size: Vector3i) -> Dictio
 			if reason != "":
 				break
 	if reason == "":
+		# 每一格底下都必须踩实（洞穴/悬空会漏）
+		for dx in size.x:
+			for dz in size.z:
+				if not world.is_solid(Vector3i(at_cell.x + dx, at_cell.y - 1, at_cell.z + dz)):
+					reason = "地基下面是空的，先把脚下填实"
+					break
+			if reason != "":
+				break
+	if reason == "":
 		# 占地范围里不能站着单位（不然单位会被糊进墙里）
 		for entry in units:
 			var u: RigidBody3D = entry["unit"]
@@ -1067,6 +1076,12 @@ func _tick_buildings(delta: float) -> void:
 			node.build_left = maxf(0.0, node.build_left - delta)
 			node._update_build_progress()
 			continue
+		# 地基被挖掉就停工（占地每格下面都要有方块）
+		var supported: bool = node.has_support()
+		if supported == false:
+			node.set_unsupported_look(true)
+			continue
+		node.set_unsupported_look(false)
 		entry["timer"] = float(entry["timer"]) + delta
 		var def: Dictionary = building_db.get_def(str(entry["id"]))
 		var kind := str(def.get("kind", ""))
@@ -1083,37 +1098,49 @@ func _tick_buildings(delta: float) -> void:
 
 
 func _mine_with(node, def: Dictionary) -> void:
-	# 在建筑的占地范围里往下找：只挖「能出资源」的方块（矿石/木板/草），
-	# 泥土石头跳过不挖，这样一条竖井不会白挖，出矿率也高
-	var base: Vector3i = node.base_cell
-	var size: Vector3i = node.size
+	# 采矿机在自己的"矿区"里找矿：以建筑为中心半径 12、深度 mine_depth 的方块体积，
+	# 每次扫描一小段（node.scan_cursor 记录进度），找到一块矿就挖掉收进资源，
+	# 这样不会把脚下的矿挖完就停工，能一直供矿。
 	var depth := int(def.get("mine_depth", 10))
+	var radius := int(def.get("mine_radius", 12))
+	var center: Vector3i = node.center_cell()
 	var bedrock := db.id_of("bedrock")
-	for dx in size.x:
-		for dz in size.z:
-			var x: int = base.x + dx
-			var z: int = base.z + dz
-			if not world.in_bounds(Vector3i(x, 1, z)):
-				continue
-			var top := world.surface_height(x, z)
-			for i in depth:
-				var cell := Vector3i(x, top - 1 - i, z)
-				if not world.in_bounds(cell):
-					break
-				var block_id := world.get_block(cell)
-				if block_id == BlockDB.AIR:
-					continue
-				if block_id == bedrock:
-					break
-				# 只挖值钱的矿（煤/铜/铁/金），泥土石头这类不掉资源的跳过
-				if not MINER_DROPS.has(_economy_for(int(node.team)).drop_of(block_id)):
-					continue
-				var drop := _economy_for(int(node.team)).mine_block(block_id)
-				world.set_block(cell, BlockDB.AIR)
-				node.produced += 1
-				if drop != "":
-					hud.show_message("采矿机挖到 %s" % drop)
-				return
+	var economy = _economy_for(int(node.team))
+	var budget := 400
+	var span := radius * 2 + 1
+	var per_layer := span * span
+	var total := per_layer * depth
+	var cursor := int(node.scan_cursor)
+	while budget > 0 and cursor < total:
+		var layer := cursor / per_layer
+		var rem := cursor % per_layer
+		var ox := rem % span - radius
+		var oz := rem / span - radius
+		cursor += 1
+		budget -= 1
+		var cell := Vector3i(center.x + ox, center.y - 1 - layer, center.z + oz)
+		# 别把自己脚下的地基挖空（缺一格地基就会停工）
+		if cell.x >= node.base_cell.x and cell.x < node.base_cell.x + node.size.x \
+				and cell.z >= node.base_cell.z and cell.z < node.base_cell.z + node.size.z:
+			continue
+		if not world.in_bounds(cell):
+			continue
+		var block_id := world.get_block(cell)
+		if block_id == BlockDB.AIR:
+			continue
+		if block_id == bedrock:
+			continue
+		if not MINER_DROPS.has(economy.drop_of(block_id)):
+			continue
+		var drop := economy.mine_block(block_id)
+		world.set_block(cell, BlockDB.AIR)
+		node.produced += 1
+		node.scan_cursor = cursor
+		if drop != "":
+			hud.show_message("采矿机挖到 %s" % drop)
+		return
+	# 扫完一圈就从头再扫（矿会随着地形变化重新出现）
+	node.scan_cursor = 0
 
 
 ## 充电站：给半径内同队伍的单位补电

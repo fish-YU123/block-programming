@@ -11,6 +11,7 @@ var size := Vector3i(3, 2, 3)
 var period := 1.0
 var timer := 0.0
 var produced := 0      ## 已经产出多少个东西（单位或矿石）
+var scan_cursor := 0   ## 采矿机扫矿的游标（一轮矿区扫描进度）
 var build_total := 10.0  ## 建造需要多少秒
 var build_left := 0.0    ## 还剩多少秒建完（>0 表示还在施工）
 
@@ -19,9 +20,16 @@ var world = null
 ## 施工时把整个楼换成半透明青色"轮廓"，建完再换回队伍材质
 var _saved_materials: Dictionary = {}
 var _construction := false
+var _unsupported := false
 
 ## 会转的部件：钻头（采矿机）、吊臂（组装厂）
 var _drill_bit: MeshInstance3D = null
+var _smoke: Array = []          ## 烟囱里冒出来的小烟球
+var _smoke_t := 0.0
+var _ring: MeshInstance3D = null ## 充电站的感应环
+var _core: MeshInstance3D = null
+var _anim_t := 0.0
+var _smoke_anchor := Vector3.ZERO
 var _crane: Node3D = null
 
 
@@ -151,6 +159,7 @@ func _build_visual() -> void:
 			stack_ring.material_override = glow_mat
 			stack_ring.position = Vector3(side * sx * 0.28, sy + sy * 0.68, side * sz * 0.22)
 			add_child(stack_ring)
+			_smoke_anchor = Vector3(side * sx * 0.28, sy + sy * 0.72, side * sz * 0.22)
 
 		# 产线出口（朝 +X 方向，飞飞从这里下线）
 		var outlet := MeshInstance3D.new()
@@ -193,6 +202,7 @@ func _build_visual() -> void:
 		ring.material_override = glow_mat
 		ring.position = Vector3(0.0, sy + 0.15, 0.0)
 		add_child(ring)
+		_ring = ring
 
 		var core := MeshInstance3D.new()
 		var core_mesh := SphereMesh.new()
@@ -202,6 +212,7 @@ func _build_visual() -> void:
 		core.material_override = glow_mat
 		core.position = Vector3(0.0, sy * 0.62, 0.0)
 		add_child(core)
+		_core = core
 
 	# 碰撞体（占满整个格子，单位撞不进去）
 	var body := StaticBody3D.new()
@@ -241,6 +252,28 @@ func _set_construction_look(on: bool) -> void:
 		_saved_materials.clear()
 
 
+## 地基缺失时的样子：整楼偏红发暗，提醒"这里罢工了"
+func set_unsupported_look(on: bool) -> void:
+	if on == _unsupported:
+		return
+	_unsupported = on
+	var tint: StandardMaterial3D = MatCache.of(Color(0.9, 0.25, 0.2), true, 0.5, false, 0.85)
+	if on:
+		for m in _all_meshes():
+			if m is MeshInstance3D and m.material_override != null:
+				_saved_materials[m] = m.material_override
+				m.material_override = tint
+	else:
+		for m in _saved_materials.keys():
+			if is_instance_valid(m):
+				m.material_override = _saved_materials[m]
+		_saved_materials.clear()
+
+
+func is_unsupported() -> bool:
+	return _unsupported
+
+
 func _all_meshes() -> Array:
 	var out: Array = []
 	var stack: Array = [self]
@@ -257,11 +290,79 @@ func is_under_construction() -> bool:
 	return build_left > 0.0
 
 
+func _spawn_smoke() -> void:
+	var p := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.1
+	mesh.height = 0.2
+	p.mesh = mesh
+	p.material_override = MatCache.of(Color(0.75, 0.78, 0.82), true, 0.0, false, 0.35)
+	p.position = _smoke_anchor
+	add_child(p)
+	_smoke.append({"node": p, "life": 0.0})
+
+
+func _animate(delta: float) -> void:
+	_anim_t += delta
+	# 烟囱冒烟
+	if _smoke_anchor != Vector3.ZERO and not is_under_construction():
+		_smoke_t -= delta
+		if _smoke_t <= 0.0:
+			_smoke_t = 0.35
+			_spawn_smoke()
+		for i in range(_smoke.size() - 1, -1, -1):
+			var item: Dictionary = _smoke[i]
+			item["life"] = float(item["life"]) + delta
+			var node: MeshInstance3D = item["node"]
+			if not is_instance_valid(node):
+				_smoke.remove_at(i)
+				continue
+			if float(item["life"]) > 1.8:
+				node.queue_free()
+				_smoke.remove_at(i)
+				continue
+			node.position.y += delta * 0.55
+			node.position.x += delta * 0.12 * sin(float(item["life"]) * 3.0)
+			var k: float = 1.0 + float(item["life"]) * 0.9
+			node.scale = Vector3(k, k, k)
+	# 充电站：感应环转 + 核心呼吸
+	if _ring != null:
+		_ring.rotation.y += delta * 2.0
+	if _core != null:
+		var s: float = 1.0 + 0.08 * sin(_anim_t * 3.0)
+		_core.scale = Vector3(s, s, s)
+
+
 func _process(delta: float) -> void:
+	_animate(delta)
 	if _drill_bit != null:
 		_drill_bit.rotation.y += delta * 6.0
 	if _crane != null:
 		_crane.rotation.y += delta * 1.2
+
+
+## 地基检查：占地范围内每一格的正下方都必须是实心方块，缺一格就停工
+func has_support() -> bool:
+	if world == null:
+		return true
+	for dx in range(size.x):
+		for dz in range(size.z):
+			var cell := Vector3i(base_cell.x + dx, base_cell.y - 1, base_cell.z + dz)
+			if not world.is_solid(cell):
+				return false
+	return true
+
+
+## 缺地基时格子坐标（用来提示玩家；没缺就返回 Vector3i(-1,-1,-1)）
+func missing_support_cell() -> Vector3i:
+	if world == null:
+		return Vector3i(-1, -1, -1)
+	for dx in range(size.x):
+		for dz in range(size.z):
+			var cell := Vector3i(base_cell.x + dx, base_cell.y - 1, base_cell.z + dz)
+			if not world.is_solid(cell):
+				return cell
+	return Vector3i(-1, -1, -1)
 
 
 func center_cell() -> Vector3i:

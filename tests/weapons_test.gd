@@ -50,15 +50,16 @@ func _check() -> void:
 	_main._process_weapons(0.5)
 	_record("激光能打到 2 米外的敌方单位", victim.hp < hp_before, "%.1f → %.1f" % [hp_before, victim.hp])
 
-	# 激光射程 5 格：6 米外的打不到
+	# 激光射程 8 格：9.5 米外的打不到
 	victim.hp = victim.max_hp
-	victim.global_position = Vector3(66.5, 50.0, 128.0)
+	victim.global_position = Vector3(69.5, 50.0, 128.0)
 	attacker._physics_process(0.016)
 	_main._process_weapons(0.5)
-	_record("激光打不到 5 格外", is_equal_approx(victim.hp, victim.max_hp), "%.1f" % victim.hp)
+	_record("激光打不到 8 格外", is_equal_approx(victim.hp, victim.max_hp), "%.1f" % victim.hp)
 
 	# 激光关掉就不打
 	victim.global_position = Vector3(62.0, 50.0, 128.0)
+	victim.hp = victim.max_hp
 	attacker.controls["laser"] = false
 	attacker._physics_process(0.016)
 	_main._process_weapons(0.5)

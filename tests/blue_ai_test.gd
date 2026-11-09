@@ -8,6 +8,7 @@ var _failed := 0
 var _saw_buildings := false
 var _saw_units := false
 var _saw_red_units := false
+var _saw_combat := false
 var _skipped := false
 var _done := false
 
@@ -43,19 +44,27 @@ func _process(_delta: float) -> bool:
 		_main.skip_peace()
 		_skipped = true
 	# 4) 分出胜负
+	# 记录"打过架"：任意一方掉过血
+	for team in [0, 1]:
+		for e in _main.team_units(team):
+			if float(e["unit"].hp) < float(e["unit"].max_hp) - 1.0:
+				_saw_combat = true
 	if _main.game_over != "":
 		_record("至少造了 3 栋建筑", _saw_buildings)
 		_record("蓝方靠组装厂攒出更多单位", _saw_units)
 		_record("红方也靠组装厂攒出更多单位", _saw_red_units)
+		_record("双方打过架", _saw_combat)
 		_record("对局分出胜负", true, str(_main.game_over))
 		_record("全程没有单位代码报错", not _any_error())
 		_done = true
 		return false
-	if _frames > 60 * 240:
+	if _frames > 60 * 180:
 		_record("至少造了 3 栋建筑", _saw_buildings)
 		_record("蓝方靠组装厂攒出更多单位", _saw_units)
 		_record("红方也靠组装厂攒出更多单位", _saw_red_units)
-		_record("对局分出胜负", false, "超时")
+		_record("双方打过架", _saw_combat)
+		_record("对局分出胜负（可能只是打得久）", _main.game_over != "", str(_main.game_over))
+		_record("全程没有单位代码报错", not _any_error())
 		_done = true
 	return false
 
