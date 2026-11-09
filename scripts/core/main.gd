@@ -1072,6 +1072,11 @@ func _tick_buildings(delta: float) -> void:
 		if not is_instance_valid(node):
 			continue
 		# 还在施工（默认 10 秒）不产出：进度按物理帧推进
+		# 占地体积里被方块占住了（比如被埋进石头）也罢工，等清出来再继续
+		var blocked: bool = not node.has_clear_volume()
+		node.set_blocked_look(blocked)
+		if blocked:
+			continue
 		if node.build_left > 0.0:
 			node.build_left = maxf(0.0, node.build_left - delta)
 			node._update_build_progress()

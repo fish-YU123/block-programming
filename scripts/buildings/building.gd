@@ -1,5 +1,6 @@
 extends Node3D
 const MatCache = preload("res://scripts/core/mat_cache.gd")
+const ConstructionShader = preload("res://shaders/construction.gdshader")
 ## 一栋建筑：一个占方格的方块体，带队伍颜色和碰撞体。
 ## 具体行为（采矿 / 产单位）由 main 每帧按 kind 驱动。
 
@@ -21,6 +22,8 @@ var world = null
 var _saved_materials: Dictionary = {}
 var _construction := false
 var _unsupported := false
+var _blocked := false            ## 占地体积被方块占住了（盖在石头里 / 后来被填上）
+var _construction_mat: ShaderMaterial = null
 
 ## 会转的部件：钻头（采矿机）、吊臂（组装厂）
 var _drill_bit: MeshInstance3D = null
@@ -225,26 +228,74 @@ func _build_visual() -> void:
 	add_child(body)
 
 
-## 施工中：从地基往上"长"出来，建完恢复原尺寸
+## 施工中：剖面从地面往上推进（像 3D 打印机那样一层层长起来），建完恢复正常外观
 func _update_build_progress() -> void:
 	if build_total <= 0.0:
-		scale = Vector3.ONE
+		_set_construction_look(false)
 		return
 	var progress: float = clampf(1.0 - build_left / build_total, 0.0, 1.0)
-	scale = Vector3(1.0, 0.45 + 0.55 * progress, 1.0)
 	_set_construction_look(progress < 0.999)
+	if _construction and _construction_mat != null:
+		# base_cell.y 是建筑底面所在格，顶面 = base_cell.y + size.y
+		var base_y: float = float(base_cell.y)
+		_construction_mat.set_shader_parameter("cut_y", base_y + progress * float(size.y))
 
 
-## 施工中的样子：半透明青色 + 发光，一眼能看出"还没建好"
+## 占地体积里不能有方块（要和地面/别的方块"不重叠"）
+func has_clear_volume() -> bool:
+	if world == null:
+		return true
+	for dx in range(size.x):
+		for dy in range(size.y):
+			for dz in range(size.z):
+				if world.is_solid(Vector3i(base_cell.x + dx, base_cell.y + dy, base_cell.z + dz)):
+					return false
+	return true
+
+
+## 被方块占住时也罢工（外观和缺地基一样是红的，只是原因不同）
+func set_blocked_look(on: bool) -> void:
+	if on == _blocked:
+		return
+	_blocked = on
+	_apply_strike_look(_blocked or _unsupported)
+
+
+func is_blocked() -> bool:
+	return _blocked
+
+
+## 罢工外观：整楼偏红发暗；恢复时按「施工中 / 正常」重新套用正确外观
+func _apply_strike_look(on: bool) -> void:
+	if on:
+		_construction = false
+		var tint: StandardMaterial3D = MatCache.of(Color(0.9, 0.25, 0.2), true, 0.5, false, 0.85)
+		for m in _all_meshes():
+			_saved_materials[m] = m.material_override
+			m.material_override = tint
+		return
+	for m in _saved_materials.keys():
+		if is_instance_valid(m):
+			m.material_override = _saved_materials[m]
+	_saved_materials.clear()
+	_construction = false
+	_update_build_progress()
+
+
+## 施工中的样子：半透明青色 + 从下往上的剖面切割 + 切口发光
 func _set_construction_look(on: bool) -> void:
 	if on == _construction:
 		return
 	_construction = on
 	if on:
-		var ghost: StandardMaterial3D = MatCache.of(Color(0.45, 0.85, 1.0), true, 0.6, true, 0.55)
+		if _construction_mat == null:
+			_construction_mat = ShaderMaterial.new()
+			_construction_mat.shader = ConstructionShader
+		_construction_mat.set_shader_parameter("tint", Color(0.42, 0.84, 1.0, 1.0))
+		_construction_mat.set_shader_parameter("alpha", 0.5)
 		for m in _all_meshes():
 			_saved_materials[m] = m.material_override
-			m.material_override = ghost
+			m.material_override = _construction_mat
 	else:
 		for m in _saved_materials.keys():
 			if is_instance_valid(m):
@@ -257,17 +308,7 @@ func set_unsupported_look(on: bool) -> void:
 	if on == _unsupported:
 		return
 	_unsupported = on
-	var tint: StandardMaterial3D = MatCache.of(Color(0.9, 0.25, 0.2), true, 0.5, false, 0.85)
-	if on:
-		for m in _all_meshes():
-			if m is MeshInstance3D and m.material_override != null:
-				_saved_materials[m] = m.material_override
-				m.material_override = tint
-	else:
-		for m in _saved_materials.keys():
-			if is_instance_valid(m):
-				m.material_override = _saved_materials[m]
-		_saved_materials.clear()
+	_apply_strike_look(_blocked or _unsupported)
 
 
 func is_unsupported() -> bool:

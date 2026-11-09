@@ -71,7 +71,11 @@ func _process(_delta: float) -> bool:
 	var miner = miner_entry["node"]
 	# 建造要花时间：刚放下时应该在施工中
 	_record("刚放下时在施工", miner.is_under_construction(), "剩余 %.1f 秒" % miner.build_left)
-	_record("施工中模型是矮的", miner.scale.y < 0.6, "%.2f" % miner.scale.y)
+	_main._tick_buildings(1.0)
+	var cut_a: float = float(miner._construction_mat.get_shader_parameter("cut_y"))
+	_main._tick_buildings(3.0)
+	var cut_b: float = float(miner._construction_mat.get_shader_parameter("cut_y"))
+	_record("施工剖面从下往上推进", cut_b > cut_a, "%.2f → %.2f" % [cut_a, cut_b])
 	_main._tick_buildings(11.0)
 	_record("10 秒后建好", not miner.is_under_construction() and is_equal_approx(miner.scale.y, 1.0))
 
@@ -98,6 +102,15 @@ func _process(_delta: float) -> bool:
 	world.set_block(lost, keep)
 	_main._tick_buildings(2.0)
 	_record("补回地基就恢复", not miner.is_unsupported())
+
+	# 3.6) 占地体积被方块占住也停工
+	var inside := Vector3i(spot.x, int(spot.y) + 1, spot.z)
+	world.set_block(inside, _main.db.id_of("stone"))
+	_main._tick_buildings(2.0)
+	_record("体积被方块占住就停工", miner.is_blocked(), str(miner.is_blocked()))
+	world.set_block(inside, 0)
+	_main._tick_buildings(2.0)
+	_record("清掉方块后恢复工作", not miner.is_blocked(), str(miner.is_blocked()))
 
 	# 4) 重叠放置被拒绝
 	var err2: String = _main.place_building_at("miner", spot)
