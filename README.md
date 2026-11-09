@@ -47,6 +47,8 @@
 
 首次启动可能黑屏 30~60 秒（Godot 在这台机器上编译着色器管线缓存，之后就快了）。
 
+开发提示：`shaders/` 里放着自定义着色器（如施工剖面 `construction.gdshader`）。
+
 **每局地形都是新的**（随机种子）；想复现某张图：`--path . -- --world-seed=12345`。
 
 操作：WASD 移动 / 空格上升 / Shift 下降 / ⌘ 加速 / 按住左键拖动转视角 / 单击左键标记挖掘 / 右键标记放置 / 数字键 1-8 选方块 / Q 切换建筑 / B 标记建造 / N 标记拆除 / 滚轮调视野 / C 代码面板（或双击本方单位）/ T 切换单位 / F 放置单位 / G 收回单位 / R 重开。
@@ -54,52 +56,88 @@
 ## 测试
 
 ```sh
-./run_tests.sh
+./run_tests.sh      # 24 套 headless 测试（VM/世界/单位/经济/建筑/战斗/联机…）
 ```
+
+截图脚本在 `tests/preview/`，每个脚本会在 `docs/` 下生成对应的预览图。
 
 ## 目录结构
 
 ```
-data/blocks/      方块定义（JSON）
-scenes/main.tscn  主场景
-scripts/core/     游戏入口 main.gd
-scripts/world/    方块表、地形生成、体素世界（区块网格/碰撞/射线）
-scripts/player/   自由视角相机
-scripts/ui/       HUD
-scripts/lang/     沙箱字节码 VM（词法/语法/编译/虚拟机）
-tests/            headless 测试与截图工具
-docs/             预览图、玩家编程手册、上架与版权清单
+data/blocks/       方块定义（JSON，11 种）
+data/units/        单位定义（飞飞 / 车车）
+data/buildings/    建筑定义（采矿机 / 组装厂 / 充电站）
+scenes/main.tscn   主场景
+scripts/core/      游戏入口 main.gd、材质缓存
+scripts/world/     方块表、地形生成、体素世界（区块网格/碰撞/DDA 射线）、A* 寻路、程序化贴图
+scripts/units/     飞飞、车车、单位控制器（跑玩家代码+注入传感器）、预设代码（presets/）
+scripts/buildings/ 建筑实体与建筑表
+scripts/economy/   资源账本与生产
+scripts/net/       联机协议、快照、UDP 会话、主机端管理器
+scripts/ui/        HUD、代码面板、联机面板
+scripts/player/    自由视角相机
+scripts/lang/      沙箱字节码 VM（词法/语法/编译/虚拟机）
+shaders/           施工剖面等自定义着色器
+tests/             headless 测试（*_test.gd）
+tests/preview/     截图脚本（生成 docs/ 里的预览图）
+docs/              预览图与玩家/开发文档
 ```
 
 ## 路线图
 
 1. ✅ 方块世界与虚影标记（挖掘/放置/建造由单位代码执行）
-2. ⬜ 单位系统：部署、传感器、执行玩家代码
-3. ⬜ 资源与生产：矿 → 部件 → 单位
-4. ⬜ 双阵营与胜负判定
-5. ⬜ 联机（服务端权威）
-6. ⬜ Steam 接入（GodotSteam）
+2. ✅ 单位系统：飞飞 / 车车、传感器、执行玩家代码（沙箱 VM）
+3. ✅ 资源与生产：矿机采矿 → 组装厂产单位 → 充电站补电
+4. ✅ 双阵营与胜负判定（60 秒发育期 + 钻头/激光/火炮）
+5. ✅ 联机（服务端权威、20Hz 快照、M 键面板）
+6. ⬜ Steam 接入（GodotSteam 打包、成就、商店页）
 
-## 预设单位（M2）
+更细的拆分见 `docs/路线图.md`；上线前的素材/字体/商标风险见 `docs/上架与版权清单.md`。
 
-目前只有一台预设单位「飞飞」，不接受玩家自行拼装（拼装系统留到以后）：
+## 预设单位
+
+两台预设单位，玩家自己写代码指挥（T 键切换、F 放置、G 收回）。
+
+### 飞飞（0.75 米立方飞行器）
 
 - 机身：底部一个可偏转的矢量喷口（升力 + 侧移），左右各一个 RCS 吊舱（前后两个喷口，负责平移和转向）
 - 机头：激光钻头，按控制指令每隔 0.25 秒朝正前方挖掉一个方块
-- 武器：`laser(x,y,z)` 5 格持续激光（对块 80/s、对单位 22/s）、`shoot(x,y,z)` 15 格炮击（对块 60、对单位 34，冷却 1 秒、每发 2400 焦耳）
-- 方块有血量：草/泥土/沙 18、木板 36、石头 42、煤矿 60、铜矿 72、基岩打不动
-- 顶部：小雷达，输出以自身为中心 5×5 的方块名和地表高度
-- 尺寸：0.75 × 0.75 × 0.75 米（外接立方体，代码里 `size` 可调）
-- 参数：12kg / 120kJ 电池 / 升力 520N / RCS 60N / 喷口偏转 ±24° / 钻孔 1.5m、0.25s 一次
+- 顶部：小雷达，输出自身周围 5×5 的地表、5×5×5 的方块、10 格内的敌方单位（坐标/类型/血量/距离）
+- 武器：`laser(x,y,z)` 8 格持续激光（对块 80/s、对单位 45/s）、`shoot(x,y,z)` 15 格炮击（对块 60、对单位 70，冷却 0.7 秒、每发 2400 焦耳）
+- 参数：12kg / 500kJ 电池 / 血量 90 / 升力 520N / RCS 60N / 喷口偏转 ±24° / 钻孔 1.5m、0.25s 一次
+- 造价：铜 18 + 煤 8
+- 方块有血量：草/泥土/沙 18、木板 36、石头 42、煤矿 60、铜矿 72、铁 96、金 108、基岩打不动
 
-玩家代码可用的传感器：`pos` `vel` `cell` `yaw` `energy` `energy_ratio` `thrust` `drill_hits` `blocks[5][5]` `heights[5][5]` `blocks3[5][5][5]` `here` `enemies`（10 格内，带 `type/hp/dist`）；
-控制接口：`set_lift(0~1)` `set_tilt(前后, 左右)` `set_rcs(转向, 前后)` `drill(开关)` `laser(x,y,z)` `laser_off()` `shoot(x,y,z)`。
-默认示例代码见 `scripts/units/unit_code_default.gd`（自动悬停）。
+### 车车（1.2 米立方地面工程车）
 
+- 四个轮子 + 车头钻头；`set_rcs(转向, 油门)` 开车（飞行指令对车车无效）
+- 血量 320、抗揍；不能飞，适合钻矿和贴地推进
+- 造价：铜 45 + 铁 15
+
+玩家代码可用传感器：`pos` `vel` `cell` `yaw` `energy` `energy_ratio` `thrust` `drill_hits` `hp` `hp_ratio` `team` `peace` `t` `res` `leader` `blocks[5][5]` `heights[5][5]` `blocks3[5][5][5]` `here` `below` `ore` `orders` `enemies`；
+控制接口：`set_lift(0~1)` `set_tilt(前后, 左右)` `set_rcs(转向, 前后)` `set_velocity(vx, vz)` `set_altitude(y)` `drill(开关)` `laser(x,y,z)` `laser_off()` `shoot(x,y,z)` `find_path(x,y,z)` `go_to(x,y,z)` `stop()` `build(id,x,y,z)` `build_here(id)`。
+完整说明见 `docs/单位编程手册.md` 与 `docs/飞飞快速上手.md`。
+
+### 预设 AI
+
+- `scripts/units/presets/commander_preset.gd`：红蓝共用的「指挥官 AI」——发育期造矿机/组装厂/充电站，开战立刻带兵压上
+- `scripts/units/presets/fighter_preset.gd`：会挖矿、会缠斗的对战 AI
+- `scripts/units/presets/red_preset.gd`：简单的追击 AI（早期版本，留作对照）
+- `scripts/units/presets/rover_preset.gd`：工程车示例
+
+## 截图
+
+![世界](docs/preview.png)
 ![飞飞](docs/preview-unit.png)
 ![激光与炮管](docs/preview-weapons.png)
-
-测试：`./run_tests.sh`（语言/VM 34 项、世界 24 项、单位 16 项）。
+![施工剖面](docs/preview-building.png)
+![HUD](docs/preview-hud.png)
+![动画](docs/preview-anim.png)
+![两队配色](docs/preview-teams.png)
+![新矿与充电站](docs/preview-ore-charger.png)
+![代码面板](docs/preview-codepanel.png)
+![联机](docs/preview-mp.png)
+![加载](docs/preview-loading.png)
 
 ## 联机（M6 第一版）
 
