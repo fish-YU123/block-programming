@@ -1,10 +1,24 @@
 {
   "id": "miner",
   "display_name": "采矿机",
-  "build_seconds": 10.0, "kind": "miner",
-  "size": [3, 2, 3],
-  "cost": {"copper": 20, "coal": 10},
+  "build_seconds": 10.0,
+  "kind": "miner",
+  "size": [
+    3,
+    2,
+    3
+  ],
+  "cost": {
+    "copper": 20,
+    "coal": 10
+  },
   "period": 0.9,
-  "mine_depth": 24, "mine_radius": 12,
-  "color": [0.32, 0.52, 0.92]
+  "mine_depth": 24,
+  "mine_radius": 12,
+  "color": [
+    0.32,
+    0.52,
+    0.92
+  ],
+  "hp": 260.0
 }

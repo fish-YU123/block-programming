@@ -51,7 +51,7 @@ func _process(_delta: float) -> bool:
 	var db = _main.db
 
 	# 1) 建筑数据表
-	_record("建筑表加载 3 种", _main.building_db.order.size() == 3, str(_main.building_db.order))
+	_record("建筑表加载 6 种", _main.building_db.order.size() == 6, str(_main.building_db.order))
 	_record("采矿机尺寸 3×2×3", _main.building_db.size_of("miner") == Vector3i(3, 2, 3))
 	_record("组装厂尺寸 3×3×3", _main.building_db.size_of("factory") == Vector3i(3, 3, 3))
 	_record("采矿机周期 0.9 秒", is_equal_approx(_main.building_db.period_of("miner"), 0.9))
@@ -160,6 +160,7 @@ func _process(_delta: float) -> bool:
 		var unit = _main.team_units(0)[0]["unit"]
 		unit.global_position = _main.buildings[-1]["node"].center_world() + Vector3(3.0, 0.0, 0.0)
 		unit.energy_j = 1000.0
+		_main.power_pool[0] = 500.0
 		_main._tick_buildings(1.0)
 		_record("充电站给单位充电", unit.energy_j > 1000.0, "电量 %.0f" % unit.energy_j)
 		unit.energy_j = unit.energy_max

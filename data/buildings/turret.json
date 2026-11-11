@@ -1,0 +1,25 @@
+{
+  "id": "turret",
+  "display_name": "哨戒炮塔",
+  "build_seconds": 10.0,
+  "kind": "turret",
+  "size": [
+    2,
+    3,
+    2
+  ],
+  "cost": {
+    "copper": 45,
+    "iron": 20
+  },
+  "hp": 260.0,
+  "period": 0.7,
+  "range": 14.0,
+  "damage": 42.0,
+  "power_draw": 20.0,
+  "color": [
+    0.85,
+    0.3,
+    0.25
+  ]
+}

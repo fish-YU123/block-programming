@@ -1,0 +1,22 @@
+{
+  "id": "battery",
+  "display_name": "储能站",
+  "build_seconds": 8.0,
+  "kind": "battery",
+  "size": [
+    2,
+    2,
+    2
+  ],
+  "cost": {
+    "copper": 25,
+    "coal": 15
+  },
+  "hp": 200.0,
+  "capacity": 600.0,
+  "color": [
+    0.35,
+    0.85,
+    0.95
+  ]
+}

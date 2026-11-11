@@ -53,7 +53,7 @@ def 建设():
     # 上一栋还在施工（10 秒）就先别动，让建筑一栋一栋拔地而起
     if t < mem["等"]:
         return
-    # 建造顺序：矿机 → 两座组装厂 → (攒钱) → 再加组装厂 / 充电站
+    # 建造顺序：矿机 → 发电站 → 储能站 → 组装厂 → 充电站 → 炮塔 → (攒钱) 扩张
     if mem["已建"] == 0:
         if res["copper"] >= 20 and res["coal"] >= 10:
             if build_here("miner") == "":
@@ -61,31 +61,47 @@ def 建设():
                 mem["等"] = t + 11.0
                 print("矿机就位")
     elif mem["已建"] == 1:
-        if res["copper"] >= 40 and res["coal"] >= 30:
-            if build_here("factory") == "":
+        if res["copper"] >= 35 and res["iron"] >= 15:
+            if build_here("powerplant") == "":
                 mem["已建"] = 2
                 mem["等"] = t + 11.0
-                print("组装厂一号就位")
+                print("发电站就位")
     elif mem["已建"] == 2:
+        if res["copper"] >= 40 and res["coal"] >= 30:
+            if build_here("factory") == "":
+                mem["已建"] = 3
+                mem["等"] = t + 11.0
+                print("组装厂一号就位")
+    elif mem["已建"] == 3:
+        if res["copper"] >= 25 and res["coal"] >= 15:
+            if build_here("battery") == "":
+                mem["已建"] = 4
+                mem["等"] = t + 11.0
+                print("储能站就位")
+    elif mem["已建"] == 4:
         # 先补充电站，让部队打久了能回来补电
         if res["copper"] >= 30 and res["iron"] >= 10:
             if build_here("charger") == "":
-                mem["已建"] = 3
+                mem["已建"] = 5
                 mem["等"] = t + 11.0
                 print("充电站就位")
         elif res["copper"] >= 20 and res["coal"] >= 10:
             if build_here("miner") == "":
-                mem["已建"] = 3
+                mem["已建"] = 5
                 mem["等"] = t + 11.0
                 print("二号矿机就位")
         elif res["copper"] >= 40 and res["coal"] >= 30:
             if build_here("factory") == "":
-                mem["已建"] = 3
+                mem["已建"] = 5
                 mem["等"] = t + 11.0
                 print("组装厂二号就位")
     else:
-        # 铜优先留给定产，攒够了才盖充电站 / 新工厂
-        if res["copper"] >= 200 and res["coal"] >= 80:
+        # 铜优先留给定产；攒够了再补炮塔防偷家
+        if res["copper"] >= 60 and res["iron"] >= 25:
+            if build_here("turret") == "":
+                mem["等"] = t + 11.0
+                print("炮塔就位")
+        elif res["copper"] >= 200 and res["coal"] >= 80:
             if build_here("factory") == "":
                 mem["等"] = t + 11.0
                 print("再盖一座组装厂")
@@ -107,11 +123,15 @@ def 进攻():
         到(mem["家x"], mem["家z"], 20.0, 地面 + 8.0)
         return
     if len(enemies) == 0:
-        # 没有雷达范围内的敌人就压向对面基地附近蹲点（用队伍判定方向，并夹在版图内）
-        if team == 0:
-            到(min(220.0, pos.x + 26.0), pos.z, 26.0, 地面 + 9.0)
+        # 雷达里没有敌人：往地图中线巡航（双方都会往中间靠，保证能打起来，
+        # 而不是各自飞到对面空基地蹲着互相看不见）
+        if pos.x < 118.0:
+            到(126.0, 128.0, 24.0, 地面 + 9.0)
+        elif pos.x > 138.0:
+            到(130.0, 128.0, 24.0, 地面 + 9.0)
         else:
-            到(max(36.0, pos.x - 26.0), pos.z, 26.0, 地面 + 9.0)
+            set_velocity(0.0, 0.0)
+            set_altitude(地面 + 9.0)
         drill(False)
         laser_off()
         return

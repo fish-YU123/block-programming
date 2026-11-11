@@ -13,6 +13,10 @@ var size := Vector3i(3, 2, 3)
 var period := 1.0
 var timer := 0.0
 var produced := 0      ## 已经产出多少个东西（单位或矿石）
+signal destroyed(building: Node3D)
+var max_hp := 300.0    ## 建筑血量（来自 data/buildings/*.json 的 hp）
+var hp := 300.0
+var alive := true
 var scan_cursor := 0   ## 采矿机扫矿的游标（一轮矿区扫描进度）
 var build_total := 10.0  ## 建造需要多少秒
 var build_left := 0.0    ## 还剩多少秒建完（>0 表示还在施工）
@@ -24,6 +28,7 @@ var _saved_materials: Dictionary = {}
 var _construction := false
 var _unsupported := false
 var _blocked := false            ## 占地体积被方块占住了（盖在石头里 / 后来被填上）
+var _stalled := false            ## 缺电停工（发电站没煤 / 炮塔、充电站没电）
 var _construction_mat: ShaderMaterial = null
 var _badge: Sprite3D = null      ## 屋顶状态图标（地基不牢 / 被埋）
 
@@ -47,6 +52,8 @@ func setup(world_ref, definition: Dictionary, at_cell: Vector3i, team_id: int) -
 	var raw: Array = definition.get("size", [3, 2, 3])
 	size = Vector3i(int(raw[0]), int(raw[1]), int(raw[2]))
 	period = maxf(float(definition.get("period", 1.0)), 0.01)
+	max_hp = maxf(float(definition.get("hp", 300.0)), 1.0)
+	hp = max_hp
 	build_total = maxf(float(definition.get("build_seconds", 10.0)), 0.0)
 	build_left = build_total
 	position = Vector3(base_cell) + Vector3(0.5, 0.0, 0.5)
@@ -54,6 +61,21 @@ func setup(world_ref, definition: Dictionary, at_cell: Vector3i, team_id: int) -
 	_badge = StatusBadges.make_sprite(self, Vector3(0.0, float(size.y) + 0.9, 0.0))
 	_update_build_progress()
 	_refresh_badge()
+
+
+## 挨打：血量归零就发出 destroyed 信号并把自己从场景里去掉（main 负责从列表里删）
+func take_damage(amount: float) -> void:
+	if not alive or amount <= 0.0:
+		return
+	hp = maxf(0.0, hp - amount)
+	if hp <= 0.0:
+		alive = false
+		destroyed.emit(self)
+		queue_free()
+
+
+func hp_ratio() -> float:
+	return clampf(hp / maxf(max_hp, 0.001), 0.0, 1.0)
 
 
 func _build_visual() -> void:
@@ -221,6 +243,65 @@ func _build_visual() -> void:
 		add_child(core)
 		_core = core
 
+	elif kind == "powerplant":
+		# 发电站：两根排烟管 + 顶部橙色能量球
+		for i in 2:
+			var stack := MeshInstance3D.new()
+			var stack_mesh := CylinderMesh.new()
+			stack_mesh.top_radius = 0.22
+			stack_mesh.bottom_radius = 0.3
+			stack_mesh.height = sy * 1.25
+			stack.mesh = stack_mesh
+			stack.material_override = frame_mat
+			stack.position = Vector3(-sx * 0.22 + float(i) * sx * 0.44, sy * 0.95, 0.0)
+			add_child(stack)
+		var orb := MeshInstance3D.new()
+		var orb_mesh := SphereMesh.new()
+		orb_mesh.radius = sx * 0.16
+		orb_mesh.height = sx * 0.32
+		orb.mesh = orb_mesh
+		orb.material_override = glow_mat
+		orb.position = Vector3(0.0, sy + 0.25, 0.0)
+		add_child(orb)
+		_core = orb
+	elif kind == "battery":
+		# 储能站：三颗叠起来的发光电池块
+		for i in 3:
+			var cell := MeshInstance3D.new()
+			var cell_mesh := BoxMesh.new()
+			cell_mesh.size = Vector3(sx * 0.42, sy * 0.2, sz * 0.42)
+			cell.mesh = cell_mesh
+			cell.material_override = glow_mat
+			cell.position = Vector3(0.0, sy * (0.25 + float(i) * 0.26), 0.0)
+			add_child(cell)
+		_ring = null
+	elif kind == "turret":
+		# 哨戒炮塔：底座 + 可转动的炮管
+		var turret_base := MeshInstance3D.new()
+		var base_mesh := CylinderMesh.new()
+		base_mesh.top_radius = sx * 0.34
+		base_mesh.bottom_radius = sx * 0.4
+		base_mesh.height = sy * 0.28
+		turret_base.mesh = base_mesh
+		turret_base.material_override = body_mat
+		turret_base.position = Vector3(0.0, sy * 0.18, 0.0)
+		add_child(turret_base)
+
+		var head := Node3D.new()
+		head.position = Vector3(0.0, sy * 0.34, 0.0)
+		add_child(head)
+		var barrel := MeshInstance3D.new()
+		var barrel_mesh := CylinderMesh.new()
+		barrel_mesh.top_radius = 0.075
+		barrel_mesh.bottom_radius = 0.09
+		barrel_mesh.height = sx * 0.8
+		barrel.mesh = barrel_mesh
+		barrel.material_override = frame_mat
+		barrel.rotation.x = PI * 0.5
+		barrel.position = Vector3(0.0, 0.0, -sx * 0.4)
+		head.add_child(barrel)
+		_crane = head
+
 	# 碰撞体（占满整个格子，单位撞不进去）
 	var body := StaticBody3D.new()
 	var shape := CollisionShape3D.new()
@@ -271,6 +352,19 @@ func is_blocked() -> bool:
 	return _blocked
 
 
+## 缺电停工外观（和缺地基一样的红色罢工，但头顶图标是"停机"）
+func set_stalled_look(on: bool) -> void:
+	if on == _stalled:
+		return
+	_stalled = on
+	_apply_strike_look(_blocked or _unsupported or _stalled)
+	_refresh_badge()
+
+
+func is_stalled() -> bool:
+	return _stalled
+
+
 ## 罢工外观：整楼偏红发暗；恢复时按「施工中 / 正常」重新套用正确外观
 func _apply_strike_look(on: bool) -> void:
 	if on:
@@ -314,7 +408,7 @@ func set_unsupported_look(on: bool) -> void:
 	if on == _unsupported:
 		return
 	_unsupported = on
-	_apply_strike_look(_blocked or _unsupported)
+	_apply_strike_look(_blocked or _unsupported or _stalled)
 	_refresh_badge()
 
 
@@ -333,6 +427,8 @@ func _refresh_badge() -> void:
 		kind = StatusBadges.Kind.BURIED
 	elif _unsupported:
 		kind = StatusBadges.Kind.FOUNDATION
+	elif _stalled:
+		kind = StatusBadges.Kind.STALLED
 	StatusBadges.set_kind(_badge, kind)
 	if kind != StatusBadges.Kind.NONE:
 		var bob := sin(_anim_t * 3.0) * 0.06
@@ -430,6 +526,14 @@ func missing_support_cell() -> Vector3i:
 			if not world.is_solid(cell):
 				return cell
 	return Vector3i(-1, -1, -1)
+
+
+## 炮塔之类的可转动部件朝目标转过去
+func face_target(point: Vector3) -> void:
+	if _crane == null:
+		return
+	var local: Vector3 = to_local(point)
+	_crane.rotation.y = atan2(-local.x, -local.z)
 
 
 func center_cell() -> Vector3i:

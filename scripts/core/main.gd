@@ -51,6 +51,7 @@ var production: Production
 var building_db: BuildingDB
 ## 已有的建筑：{def_id, node, team, kind, timer}
 var buildings: Array = []
+var power_pool: Dictionary = {}   ## 每队当前电力储量（team -> float）
 var selected_building := 0
 ## 玩家当前选的预设单位（T 键切换）
 var selected_unit := 0
@@ -213,6 +214,160 @@ func _ready() -> void:
 	add_child(_highlight)
 	_refresh_hud()
 	hud.set_loading_mode(true)
+
+
+## ---------------- 建筑血量 / 能源 / 炮塔 ----------------
+
+## 建筑挨打：血掉光就从列表里移除（节点自己 queue_free）
+func _damage_building(node: Node3D, amount: float) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+	if not node.has_method("take_damage"):
+		return
+	node.take_damage(amount)
+	if node.hp <= 0.0:
+		_remove_building(node)
+
+
+func _remove_building(node: Node3D) -> void:
+	for i in range(buildings.size() - 1, -1, -1):
+		if buildings[i]["node"] == node:
+			buildings.remove_at(i)
+			break
+	if node.get_parent() != null:
+		node.get_parent().remove_child(node)
+	node.queue_free()
+	if hud != null:
+		hud.show_message("一栋建筑被摧毁了")
+
+
+## 射线与敌方建筑求交（逐个建筑做 AABB），返回 {building, point}
+func _building_ray_hit(from: Vector3, dir: Vector3, max_dist: float, attacker_team: int) -> Dictionary:
+	var best_t := max_dist
+	var best: Dictionary = {}
+	for entry in buildings:
+		var node = entry["node"]
+		if not is_instance_valid(node) or not node.alive:
+			continue
+		if int(node.team) == attacker_team:
+			continue
+		if node.is_under_construction():
+			continue
+		var bmin: Vector3 = Vector3(node.base_cell)
+		var bmax: Vector3 = Vector3(node.base_cell) + Vector3(node.size)
+		var hit_t: float = _ray_aabb(from, dir, bmin, bmax)
+		if hit_t < 0.0 or hit_t > best_t:
+			continue
+		best_t = hit_t
+		best = {"building": node, "point": from + dir * hit_t}
+	return best
+
+
+## 射线与轴对齐盒子求交（slab 法），返回进入距离；不命中返回 -1
+func _ray_aabb(from: Vector3, dir: Vector3, bmin: Vector3, bmax: Vector3) -> float:
+	var tmin := -INF
+	var tmax := INF
+	for i in 3:
+		var d: float = dir[i]
+		var o: float = from[i]
+		if absf(d) < 0.00001:
+			if o < bmin[i] or o > bmax[i]:
+				return -1.0
+			continue
+		var t1: float = (bmin[i] - o) / d
+		var t2: float = (bmax[i] - o) / d
+		if t1 > t2:
+			var swap: float = t1
+			t1 = t2
+			t2 = swap
+		if t1 > tmin:
+			tmin = t1
+		if t2 < tmax:
+			tmax = t2
+		if tmin > tmax:
+			return -1.0
+	if tmax < 0.0:
+		return -1.0
+	if tmin < 0.0:
+		return 0.0
+	return tmin
+
+
+const POWER_BASE_CAP := 120.0
+
+## 全队当前电力储量
+func power_of(team: int) -> float:
+	return float(power_pool.get(team, 0.0))
+
+
+## 全队电力上限：基础 120 + 每座储能站的容量
+func power_cap(team: int) -> float:
+	var cap := POWER_BASE_CAP
+	for entry in buildings:
+		var node = entry["node"]
+		if not is_instance_valid(node) or not node.alive or int(node.team) != team:
+			continue
+		if str(entry["id"]) == "battery":
+			cap += float(building_db.get_def("battery").get("capacity", 600.0))
+	return cap
+
+
+func add_power(team: int, amount: float) -> void:
+	power_pool[team] = minf(power_cap(team), power_of(team) + amount)
+
+
+## 花电：不够就返回 false（建筑因此罢工）
+func use_power(team: int, amount: float) -> bool:
+	if power_of(team) < amount:
+		return false
+	power_pool[team] = power_of(team) - amount
+	return true
+
+
+## 发电站：烧煤换电
+func _run_powerplant(node, def: Dictionary) -> void:
+	var team_economy = _economy_for(int(node.team))
+	var fuel := str(def.get("fuel", "coal"))
+	var amount := int(def.get("fuel_amount", 1))
+	if not team_economy.spend({fuel: amount}):
+		node.set_stalled_look(true)
+		return
+	node.set_stalled_look(false)
+	add_power(int(node.team), float(def.get("power_out", 120.0)))
+	node.produced += 1
+
+
+## 哨戒炮塔：打范围内最近的敌方单位（要消耗电）
+func _run_turret(node, def: Dictionary) -> void:
+	var radius := float(def.get("range", 14.0))
+	var center: Vector3 = node.center_world() + Vector3(0.0, float(node.size.y) * 0.5, 0.0)
+	var target: RigidBody3D = null
+	var best_dist := radius
+	for entry in units:
+		var unit: RigidBody3D = entry["unit"]
+		if not is_instance_valid(unit) or not unit.alive:
+			continue
+		if int(unit.team) == int(node.team):
+			continue
+		var dist: float = unit.global_position.distance_to(center)
+		if dist < best_dist:
+			best_dist = dist
+			target = unit
+	if target == null:
+		return
+	if best_dist > 0.01:
+		var blocked_hit: Dictionary = world.raycast(center, target.global_position) if world != null else {}
+		if not blocked_hit.is_empty():
+			var hit_dist: float = center.distance_to(blocked_hit["point"])
+			if hit_dist < best_dist - 0.8:
+				return
+	if not use_power(int(node.team), float(def.get("power_draw", 20.0))):
+		node.set_stalled_look(true)
+		return
+	node.set_stalled_look(false)
+	node.face_target(target.global_position)
+	target.take_damage(float(def.get("damage", 42.0)))
+	node.produced += 1
 
 
 ## ---------------- 联机 ----------------
@@ -562,7 +717,9 @@ func _physics_process(delta: float) -> void:
 		if self_unit.alive:
 			controller.set_orders(orders_for(self_unit.global_position))
 			controller.set_peace(peace_left)
-			controller.set_resources(_economy_for(int(entry.get("team", TEAM_BLUE))).all())
+			var team_res: Dictionary = _economy_for(int(entry.get("team", TEAM_BLUE))).all()
+			team_res["power"] = int(power_of(int(entry.get("team", TEAM_BLUE))))
+			controller.set_resources(team_res)
 		controller.tick(delta)
 	# 武器：发育时间里也能挖方块（只对单位断伤）；贴身钻头战斗只在开打后结算
 	_process_weapons(delta)
@@ -646,7 +803,15 @@ func _resolve_laser(u: RigidBody3D, delta: float) -> void:
 		block_cell = block_hit["cell"]
 		limit = block_t
 	var unit_hit: Dictionary = {} if in_peace() else _unit_ray_hit(u, from, dir, limit)
+	var reach := limit
 	if not unit_hit.is_empty():
+		reach = from.distance_to(unit_hit["point"])
+	var building_hit: Dictionary = {} if in_peace() else _building_ray_hit(from, dir, reach, int(u.team))
+	if not building_hit.is_empty():
+		end = building_hit["point"]
+		_damage_building(building_hit["building"], u.laser_dps_unit * delta)
+		u.laser_hits += 1
+	elif not unit_hit.is_empty():
 		end = unit_hit["point"]
 		var victim: RigidBody3D = unit_hit["unit"]
 		victim.take_damage(u.laser_dps_unit * delta)
@@ -680,7 +845,14 @@ func _on_gun_fired(u: RigidBody3D, from: Vector3, dir: Vector3) -> void:
 		limit = from.distance_to(block_hit["point"])
 		block_cell = block_hit["cell"]
 	var unit_hit: Dictionary = {} if in_peace() else _unit_ray_hit(u, from, dir, limit)
+	var reach := limit
 	if not unit_hit.is_empty():
+		reach = from.distance_to(unit_hit["point"])
+	var building_hit: Dictionary = {} if in_peace() else _building_ray_hit(from, dir, reach, int(u.team))
+	if not building_hit.is_empty():
+		end = building_hit["point"]
+		_damage_building(building_hit["building"], u.gun_damage_unit)
+	elif not unit_hit.is_empty():
 		end = unit_hit["point"]
 		var victim: RigidBody3D = unit_hit["unit"]
 		victim.take_damage(u.gun_damage_unit)
@@ -1100,6 +1272,10 @@ func _tick_buildings(delta: float) -> void:
 			_produce_unit(node)
 		elif kind == "charger":
 			_charge_nearby(node, def, period)
+		elif kind == "powerplant":
+			_run_powerplant(node, def)
+		elif kind == "turret":
+			_run_turret(node, def)
 
 
 func _mine_with(node, def: Dictionary) -> void:
@@ -1152,6 +1328,11 @@ func _mine_with(node, def: Dictionary) -> void:
 func _charge_nearby(node, def: Dictionary, period: float) -> void:
 	var radius := float(def.get("radius", 14.0))
 	var power := float(def.get("power_w", 900.0))
+	# 充电站要从电网里取电：没电就罢工（头顶显示停机图标）
+	if not use_power(int(node.team), float(def.get("power_draw", 24.0))):
+		node.set_stalled_look(true)
+		return
+	node.set_stalled_look(false)
 	var center: Vector3 = node.center_world()
 	var charged := 0
 	for entry in units:

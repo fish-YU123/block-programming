@@ -1,0 +1,25 @@
+{
+  "id": "powerplant",
+  "display_name": "发电站",
+  "build_seconds": 10.0,
+  "kind": "powerplant",
+  "size": [
+    3,
+    3,
+    3
+  ],
+  "cost": {
+    "copper": 35,
+    "iron": 15
+  },
+  "hp": 300.0,
+  "period": 3.0,
+  "fuel": "coal",
+  "fuel_amount": 1,
+  "power_out": 120.0,
+  "color": [
+    0.95,
+    0.45,
+    0.2
+  ]
+}
