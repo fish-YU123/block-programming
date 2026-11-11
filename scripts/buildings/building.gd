@@ -390,6 +390,23 @@ func _build_visual() -> void:
 		beacon.position = Vector3(0.0, sy * 1.45, 0.0)
 		add_child(beacon)
 		_core = beacon
+	elif kind == "conveyor":
+		# 传送带：矮平台 + 三条发光滚道
+		var base := MeshInstance3D.new()
+		var base_mesh := BoxMesh.new()
+		base_mesh.size = Vector3(sx * 0.9, 0.12, sz * 0.9)
+		base.mesh = base_mesh
+		base.material_override = body_mat
+		base.position = Vector3(0.0, 0.08, 0.0)
+		add_child(base)
+		for i in 3:
+			var belt := MeshInstance3D.new()
+			var belt_mesh := BoxMesh.new()
+			belt_mesh.size = Vector3(sx * 0.8, 0.05, 0.12)
+			belt.mesh = belt_mesh
+			belt.material_override = glow_mat
+			belt.position = Vector3(0.0, 0.16, -sz * 0.28 + float(i) * sz * 0.28)
+			add_child(belt)
 	elif kind == "shield":
 		# 护盾发生器：中间一个大圆球罩
 		var dome := MeshInstance3D.new()

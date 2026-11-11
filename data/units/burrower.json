@@ -1,0 +1,39 @@
+{
+  "id": "burrower",
+  "display_name": "钻地机",
+  "hint": "钻头超长，专门挖地道和矿脉",
+  "cost": {
+    "copper": 34,
+    "iron": 16
+  },
+  "size": 1.1,
+  "hp": 160.0,
+  "mass": 26.0,
+  "energy_j": 600000.0,
+  "hover_thrust_n": 1100.0,
+  "rcs_thrust_n": 90.0,
+  "gimbal_deg": 24.0,
+  "radar_radius": 2,
+  "drill": {
+    "reach": 4.0,
+    "cooldown": 0.18,
+    "power_w": 800.0
+  },
+  "idle_power_w": 60.0,
+  "lift_power_w": 600.0,
+  "rcs_power_w": 110.0,
+  "radar_unit_range": 10.0,
+  "laser": {
+    "reach": 6.0,
+    "dps_block": 160.0,
+    "dps_unit": 30.0,
+    "power_w": 700.0
+  },
+  "gun": {
+    "reach": 0.0,
+    "cooldown": 1.0,
+    "damage_block": 0.0,
+    "damage_unit": 0.0,
+    "energy_j": 0.0
+  }
+}

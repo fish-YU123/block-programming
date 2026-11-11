@@ -51,6 +51,8 @@ var production: Production
 var building_db: BuildingDB
 ## 已有的建筑：{def_id, node, team, kind, timer}
 var buildings: Array = []
+var mines: Array = []            ## 布雷车埋下的地雷
+var _delta_cache := 0.0
 var power_pool: Dictionary = {}   ## 每队当前电力储量（team -> float）
 var selected_building := 0
 ## 玩家当前选的预设单位（T 键切换）
@@ -378,6 +380,172 @@ func _process_cargo_transfers(delta: float) -> void:
 			budget -= give
 
 
+## 单位技能：自爆 / 布雷 / 维修 / 供电光环 / 干扰
+func _process_unit_abilities(delta: float) -> void:
+	var mines_alive: Array = []
+	# 地雷先结算：敌人踩到就炸
+	for mine in mines:
+		if not _step_mine(mine, delta):
+			continue
+		mines_alive.append(mine)
+	mines = mines_alive
+
+	for entry in units:
+		var u: RigidBody3D = entry["unit"]
+		if not is_instance_valid(u) or not u.alive:
+			continue
+		var def: Dictionary = entry.get("def", {})
+		var my_team := int(entry.get("team", TEAM_BLUE))
+		# 自爆无人机：靠近敌人就炸
+		if float(def.get("explode_damage", 0.0)) > 0.0:
+			var trigger := float(def.get("explode_unit_range", 2.5))
+			for other in units:
+				var target: RigidBody3D = other["unit"]
+				if target == u or not is_instance_valid(target) or not target.alive:
+					continue
+				if int(target.team) == my_team:
+					continue
+				if u.global_position.distance_to(target.global_position) <= trigger:
+					_explode_unit(u, def, my_team)
+					break
+			continue
+		# 布雷车：每隔 mine_interval 秒在自己脚下埋一颗雷
+		if float(def.get("mine_interval", 0.0)) > 0.0 and u.alive:
+			var cooldown: float = float(entry.get("mine_cd", 0.0)) - delta
+			if cooldown <= 0.0:
+				cooldown = float(def.get("mine_interval", 2.0))
+				_drop_mine(u, def, my_team)
+			entry["mine_cd"] = cooldown
+		# 维修无人机：给附近友军回血
+		if float(def.get("repair_rate", 0.0)) > 0.0:
+			var radius := float(def.get("repair_radius", 9.0))
+			var heal_rate := float(def.get("repair_rate", 14.0))
+			for other in units:
+				var friend: RigidBody3D = other["unit"]
+				if not is_instance_valid(friend) or not friend.alive or int(friend.team) != my_team:
+					continue
+				if friend.hp >= friend.max_hp:
+					continue
+				if u.global_position.distance_to(friend.global_position) > radius:
+					continue
+				friend.hp = minf(friend.max_hp, friend.hp + heal_rate * delta)
+		# 平台无人机：给附近友军回电
+		if float(def.get("aura_power", 0.0)) > 0.0:
+			var aura := float(def.get("aura_radius", 14.0))
+			var gain := float(def.get("aura_power", 9000.0)) * delta
+			for other in units:
+				var friend: RigidBody3D = other["unit"]
+				if friend == u or not is_instance_valid(friend) or not friend.alive:
+					continue
+				if int(friend.team) != my_team or friend.energy_j >= friend.energy_max:
+					continue
+				if u.global_position.distance_to(friend.global_position) > aura:
+					continue
+				friend.energy_j = minf(friend.energy_max, friend.energy_j + gain)
+
+
+## 自爆：对半径内所有敌方单位 + 建筑造成伤害，然后自己消失
+func _explode_unit(u: RigidBody3D, def: Dictionary, team: int) -> void:
+	if not is_instance_valid(u) or not u.alive:
+		return
+	var radius := float(def.get("explode_radius", 6.0))
+	var damage := float(def.get("explode_damage", 150.0))
+	var center := u.global_position
+	for other in units:
+		var target: RigidBody3D = other["unit"]
+		if target == u or not is_instance_valid(target) or not target.alive:
+			continue
+		if int(target.team) == team:
+			continue
+		var dist := center.distance_to(target.global_position)
+		if dist > radius:
+			continue
+		var falloff := clampf(1.0 - dist / radius, 0.35, 1.0)
+		target.take_damage(damage * falloff)
+	for entry in buildings:
+		var node = entry["node"]
+		if not is_instance_valid(node) or not node.alive or int(node.team) == team:
+			continue
+		if center.distance_to(node.center_world()) <= radius:
+			_damage_building(node, damage * 0.8)
+	u.take_damage(100000.0)
+
+
+## 布雷车放雷
+func _drop_mine(u: RigidBody3D, def: Dictionary, team: int) -> void:
+	var mine := {
+		"pos": u.global_position - Vector3(0.0, 0.5, 0.0),
+		"team": team,
+		"radius": float(def.get("mine_radius", 4.0)),
+		"damage": float(def.get("mine_damage", 120.0)),
+		"arm": float(def.get("mine_arm_time", 1.0)),
+		"node": null,
+	}
+	var marker := MeshInstance3D.new()
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.22
+	mesh.height = 0.3
+	marker.mesh = mesh
+	marker.material_override = MatCache.of(Color(1.0, 0.35, 0.25), true, 0.8)
+	marker.position = mine["pos"]
+	marker.set_meta("mine", true)
+	mine["node"] = marker
+	add_child(marker)
+	mines.append(mine)
+
+
+## 地雷结算：有人踩到就炸；返回 true 表示这颗雷还在
+func _step_mine(mine: Dictionary, delta: float) -> bool:
+	var arm := float(mine.get("arm", 1.0)) - delta
+	mine["arm"] = arm
+	if arm > 0.0:
+		return true
+	var pos: Vector3 = mine["pos"]
+	var team := int(mine["team"])
+	for entry in units:
+		var u: RigidBody3D = entry["unit"]
+		if not is_instance_valid(u) or not u.alive or int(u.team) == team:
+			continue
+		if u.global_position.distance_to(pos) > 1.6:
+			continue
+		var radius := float(mine["radius"])
+		var damage := float(mine["damage"])
+		for other in units:
+			var victim: RigidBody3D = other["unit"]
+			if not is_instance_valid(victim) or not victim.alive or int(victim.team) == team:
+				continue
+			var dist := pos.distance_to(victim.global_position)
+			if dist <= radius:
+				victim.take_damage(damage * clampf(1.0 - dist / radius, 0.3, 1.0))
+		for bentry in buildings:
+			var node = bentry["node"]
+			if not is_instance_valid(node) or not node.alive or int(node.team) == team:
+				continue
+			if pos.distance_to(node.center_world()) <= radius:
+				_damage_building(node, damage * 0.5)
+		if mine["node"] != null and is_instance_valid(mine["node"]):
+			mine["node"].queue_free()
+		return false
+	return true
+
+
+## 传送带：给附近的矿机/组装厂加速
+func conveyor_boost(node) -> float:
+	var bonus := 0.0
+	for entry in buildings:
+		var other = entry["node"]
+		if other == node or not is_instance_valid(other) or not other.alive:
+			continue
+		if str(entry["id"]) != "conveyor" or other.is_under_construction():
+			continue
+		if int(other.team) != int(node.team):
+			continue
+		if other.center_world().distance_to(node.center_world()) > 6.0:
+			continue
+		bonus += float(other.def.get("boost", 0.3))
+	return minf(bonus, 0.9)
+
+
 ## 队伍里有没有通电的雷达站（有就共享视野）
 func team_has_radar(team: int) -> bool:
 	for entry in buildings:
@@ -640,7 +808,8 @@ func _setup_units() -> void:
 
 ## 按单位表里的 id 造对应的节点：车车是地面车，其余默认飞飞
 func _make_unit_node(def: Dictionary) -> RigidBody3D:
-	if str(def.get("id", "")) == "rover":
+	# 有 ground 标记的单位用地面载具实现（车车 / 布雷车）
+	if str(def.get("id", "")) == "rover" or bool(def.get("ground", false)):
 		return Rover.new()
 	return Flyer.new()
 
@@ -666,7 +835,7 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 	unit.gun_fired.connect(_on_gun_fired)
 	unit.block_dug.connect(_on_block_dug)
 	controller.bind(unit, code, 1)
-	units.append({"uid": _next_uid, "unit": unit, "controller": controller, "code": code, "revision": 1, "team": team, "cost": _economy_for(team).unit_cost(def) if economy != null else {}})
+	units.append({"uid": _next_uid, "unit": unit, "controller": controller, "code": code, "revision": 1, "team": team, "cost": _economy_for(team).unit_cost(def) if economy != null else {}, "def": def})
 	_next_uid += 1
 	unit.name = "%s_%d" % [str(def.get("id", "unit")), int(units[units.size() - 1]["uid"])]
 
@@ -860,6 +1029,7 @@ func _update_code_panel() -> void:
 
 func _physics_process(delta: float) -> void:
 	_physics_frames += 1
+	_delta_cache = delta
 	if mp != null:
 		if mp.is_client():
 			# 客户端只是看：单位位置全部来自主机快照，本地不跑战斗/生产
@@ -885,6 +1055,7 @@ func _physics_process(delta: float) -> void:
 		controller.tick(delta)
 	# 武器：发育时间里也能挖方块（只对单位断伤）；贴身钻头战斗只在开打后结算
 	_process_cargo_transfers(delta)
+	_process_unit_abilities(delta)
 	_refresh_jamming()
 	_process_weapons(delta)
 	if not in_peace():
@@ -1089,7 +1260,16 @@ func _refresh_jamming() -> void:
 			continue
 		if node.is_stalled():
 			continue
-		jammers.append(node)
+		jammers.append({"pos": node.center_world(), "team": int(node.team), "radius": float(building_db.get_def("jammertower").get("radius", 18.0)), "slow": float(building_db.get_def("jammertower").get("slow", 0.5))})
+	# 飞行的干扰机也算
+	for entry in units:
+		var ju: RigidBody3D = entry["unit"]
+		if not is_instance_valid(ju) or not ju.alive:
+			continue
+		var jdef: Dictionary = entry.get("def", {})
+		if float(jdef.get("jam_radius", 0.0)) <= 0.0 or ju.energy_out:
+			continue
+		jammers.append({"pos": ju.global_position, "team": int(ju.team), "radius": float(jdef.get("jam_radius", 16.0)), "slow": float(jdef.get("jam_slow", 0.55))})
 	for entry in units:
 		var unit: RigidBody3D = entry["unit"]
 		var controller: UnitController = entry["controller"]
@@ -1097,12 +1277,10 @@ func _refresh_jamming() -> void:
 			continue
 		var rate := 1.0
 		for jammer in jammers:
-			if int(jammer.team) == int(unit.team):
+			if int(jammer["team"]) == int(unit.team):
 				continue
-			var radius := float(building_db.get_def("jammertower").get("radius", 18.0))
-			if jammer.center_world().distance_to(unit.global_position) <= radius:
-				rate = float(building_db.get_def("jammertower").get("slow", 0.5))
-				break
+			if (jammer["pos"] as Vector3).distance_to(unit.global_position) <= float(jammer["radius"]):
+				rate = minf(rate, float(jammer["slow"]))
 		controller.line_rate = rate
 
 
@@ -1457,7 +1635,7 @@ func _tick_buildings(delta: float) -> void:
 			node.set_unsupported_look(true)
 			continue
 		node.set_unsupported_look(false)
-		entry["timer"] = float(entry["timer"]) + delta
+		entry["timer"] = float(entry["timer"]) + delta * (1.0 + conveyor_boost(node))
 		var def: Dictionary = building_db.get_def(str(entry["id"]))
 		var kind := str(def.get("kind", ""))
 		var period := maxf(float(def.get("period", 1.0)), 0.01)
@@ -1596,6 +1774,18 @@ func _preset_for_unit(def: Dictionary) -> String:
 		return DefaultCode.CARGO_SOURCE
 	if uid == "gunship":
 		return DefaultCode.GUNSHIP_SOURCE
+	if uid == "kamikaze":
+		return DefaultCode.KAMIKAZE_SOURCE
+	if uid == "minelayer":
+		return DefaultCode.MINELAYER_SOURCE
+	if uid == "repair":
+		return DefaultCode.REPAIR_SOURCE
+	if uid == "jammer":
+		return DefaultCode.JAMMER_SOURCE
+	if uid == "burrower":
+		return DefaultCode.BURROWER_SOURCE
+	if uid == "carrier":
+		return DefaultCode.CARRIER_SOURCE
 	if uid == "rover":
 		return DefaultCode.ROVER_SOURCE
 	if uid == "feifei":

@@ -1,0 +1,41 @@
+{
+  "id": "carrier",
+  "display_name": "平台无人机",
+  "hint": "空中供电平台：给周围友军回电",
+  "cost": {
+    "copper": 45,
+    "steel": 18
+  },
+  "size": 1.8,
+  "hp": 260.0,
+  "mass": 60.0,
+  "energy_j": 1500000.0,
+  "hover_thrust_n": 2200.0,
+  "rcs_thrust_n": 140.0,
+  "gimbal_deg": 18.0,
+  "radar_radius": 2,
+  "drill": {
+    "reach": 1.2,
+    "cooldown": 0.4,
+    "power_w": 200.0
+  },
+  "idle_power_w": 110.0,
+  "lift_power_w": 1100.0,
+  "rcs_power_w": 180.0,
+  "radar_unit_range": 14.0,
+  "laser": {
+    "reach": 0.0,
+    "dps_block": 0.0,
+    "dps_unit": 0.0,
+    "power_w": 0.0
+  },
+  "gun": {
+    "reach": 0.0,
+    "cooldown": 1.0,
+    "damage_block": 0.0,
+    "damage_unit": 0.0,
+    "energy_j": 0.0
+  },
+  "aura_radius": 14.0,
+  "aura_power": 9000.0
+}

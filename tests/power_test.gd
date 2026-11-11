@@ -62,7 +62,7 @@ func _flat(near: Vector2i, sx: int, sz: int) -> Vector3i:
 
 func _run() -> void:
 	var db = _main.db
-	_record("建筑表读到 8 种", _main.building_db.order.size() == 14, str(_main.building_db.order.size()))
+	_record("建筑表读到 15 种", _main.building_db.order.size() == 15, str(_main.building_db.order.size()))
 	_record("有发电站/储能站/炮塔", _main.building_db.has("powerplant") and _main.building_db.has("battery") and _main.building_db.has("turret"))
 
 	# 1) 建筑血量与摧毁
