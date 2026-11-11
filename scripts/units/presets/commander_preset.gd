@@ -101,6 +101,14 @@ def 建设():
             if build_here("turret") == "":
                 mem["等"] = t + 11.0
                 print("炮塔就位")
+        elif res["copper"] >= 30 and res["iron"] >= 12:
+            if build_here("radar") == "":
+                mem["等"] = t + 11.0
+                print("雷达站就位")
+        elif res["copper"] >= 28 and res["iron"] >= 10:
+            if build_here("repairbay") == "":
+                mem["等"] = t + 11.0
+                print("维修厂就位")
         elif res["copper"] >= 200 and res["coal"] >= 80:
             if build_here("factory") == "":
                 mem["等"] = t + 11.0

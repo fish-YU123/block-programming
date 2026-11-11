@@ -12,10 +12,14 @@ const FlyerPreset = preload("res://scripts/units/presets/flyer_preset.gd")
 const RedPreset = preload("res://scripts/units/presets/red_preset.gd")
 const FighterPreset = preload("res://scripts/units/presets/fighter_preset.gd")
 const CommanderPreset = preload("res://scripts/units/presets/commander_preset.gd")
+const BuilderPreset = preload("res://scripts/units/presets/builder_preset.gd")
+const ScoutPreset = preload("res://scripts/units/presets/scout_preset.gd")
 const RoverPreset = preload("res://scripts/units/presets/rover_preset.gd")
 
 const FLYER_SOURCE := FlyerPreset.SOURCE
 const RED_SOURCE := RedPreset.SOURCE
 const FIGHTER_SOURCE := FighterPreset.SOURCE
 const COMMANDER_SOURCE := CommanderPreset.SOURCE
+const BUILDER_SOURCE := BuilderPreset.SOURCE
+const SCOUT_SOURCE := ScoutPreset.SOURCE
 const ROVER_SOURCE := RoverPreset.SOURCE

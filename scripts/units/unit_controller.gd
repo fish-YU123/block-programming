@@ -20,6 +20,7 @@ var orders: Array = []
 ## 建筑接口（由 main 注入）：func(id: String, cell: Vector3i) -> String / func(id: String) -> String
 var build_provider: Callable = Callable()
 var build_here_provider: Callable = Callable()
+var place_provider: Callable = Callable()
 ## 开局发育时间剩余秒数（>0 时双方不能攻击）
 var peace_left := 0.0
 ## 全队资源（字典，由 main 每帧喂进来）
@@ -228,6 +229,10 @@ func _wire_path_provider() -> void:
 		if build_here_provider.is_valid():
 			return str(build_here_provider.call(def_id))
 		return "没有建筑接口"
+	_vm.place_provider = func(kind: String, cell: Vector3i) -> String:
+		if place_provider.is_valid():
+			return str(place_provider.call(kind, cell))
+		return "没有放置接口"
 
 
 func _inject_sensors(refresh_lists: bool) -> void:

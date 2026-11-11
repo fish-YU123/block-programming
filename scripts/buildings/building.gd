@@ -302,6 +302,44 @@ func _build_visual() -> void:
 		head.add_child(barrel)
 		_crane = head
 
+	elif kind == "radar":
+		# 雷达站：旋转的抛物面天线（用扁球 + 支柱凑）
+		var mast := MeshInstance3D.new()
+		var mast_mesh := CylinderMesh.new()
+		mast_mesh.top_radius = 0.07
+		mast_mesh.bottom_radius = 0.1
+		mast_mesh.height = sy * 1.1
+		mast.mesh = mast_mesh
+		mast.material_override = frame_mat
+		mast.position = Vector3(0.0, sy * 0.72, 0.0)
+		add_child(mast)
+		var dish := MeshInstance3D.new()
+		var dish_mesh := SphereMesh.new()
+		dish_mesh.radius = sx * 0.3
+		dish_mesh.height = sx * 0.4
+		dish.mesh = dish_mesh
+		dish.material_override = glow_mat
+		dish.position = Vector3(0.0, sy * 1.2, 0.0)
+		dish.rotation.x = -0.5
+		add_child(dish)
+		_core = dish
+	elif kind == "repairbay":
+		# 维修厂：顶上一个发光的十字
+		var bar_a := MeshInstance3D.new()
+		var bar_a_mesh := BoxMesh.new()
+		bar_a_mesh.size = Vector3(sx * 0.5, 0.12, 0.12)
+		bar_a.mesh = bar_a_mesh
+		bar_a.material_override = glow_mat
+		bar_a.position = Vector3(0.0, sy + 0.2, 0.0)
+		add_child(bar_a)
+		var bar_b := MeshInstance3D.new()
+		var bar_b_mesh := BoxMesh.new()
+		bar_b_mesh.size = Vector3(0.12, 0.12, sz * 0.5)
+		bar_b.mesh = bar_b_mesh
+		bar_b.material_override = glow_mat
+		bar_b.position = Vector3(0.0, sy + 0.2, 0.0)
+		add_child(bar_b)
+
 	# 碰撞体（占满整个格子，单位撞不进去）
 	var body := StaticBody3D.new()
 	var shape := CollisionShape3D.new()

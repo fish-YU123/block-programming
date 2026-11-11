@@ -160,6 +160,8 @@ func _ready() -> void:
 	units_root.name = "Units"
 	add_child(units_root)
 	_load_unit_db()
+	if unit_db != null and unit_db.has("feifei"):
+		selected_unit = unit_db.order.find("feifei")
 	# 单位等世界建好再生（见 _process 里的 _world_ready 分支），否则会掉进没碰撞的空地形里
 	rig.input_enabled = false
 
@@ -294,6 +296,59 @@ func _ray_aabb(from: Vector3, dir: Vector3, bmin: Vector3, bmax: Vector3) -> flo
 
 
 const POWER_BASE_CAP := 120.0
+
+## 队伍里有没有通电的雷达站（有就共享视野）
+func team_has_radar(team: int) -> bool:
+	for entry in buildings:
+		var node = entry["node"]
+		if not is_instance_valid(node) or not node.alive or int(node.team) != team:
+			continue
+		if str(entry["id"]) == "radar" and not node.is_under_construction() and not node.is_stalled():
+			return true
+	return false
+
+
+func team_radar_range(team: int) -> float:
+	var best := 0.0
+	for entry in buildings:
+		var node = entry["node"]
+		if not is_instance_valid(node) or not node.alive or int(node.team) != team:
+			continue
+		if str(entry["id"]) != "radar" or node.is_under_construction() or node.is_stalled():
+			continue
+		best = maxf(best, float(building_db.get_def("radar").get("radar_range", 30.0)))
+	return best
+
+
+## 雷达站维持运转要电；维修厂给半径内友军补血
+func _run_radar(node, def: Dictionary) -> void:
+	if not use_power(int(node.team), float(def.get("power_draw", 6.0))):
+		node.set_stalled_look(true)
+		return
+	node.set_stalled_look(false)
+
+
+func _run_repairbay(node, def: Dictionary) -> void:
+	if not use_power(int(node.team), float(def.get("power_draw", 8.0))):
+		node.set_stalled_look(true)
+		return
+	node.set_stalled_look(false)
+	var radius := float(def.get("radius", 12.0))
+	var heal := float(def.get("heal", 6.0))
+	var center: Vector3 = node.center_world()
+	for entry in units:
+		var unit: RigidBody3D = entry["unit"]
+		if not is_instance_valid(unit) or not unit.alive:
+			continue
+		if int(unit.team) != int(node.team):
+			continue
+		if unit.global_position.distance_to(center) > radius:
+			continue
+		if unit.hp >= unit.max_hp:
+			continue
+		unit.hp = minf(unit.max_hp, unit.hp + heal)
+		node.produced += 1
+
 
 ## 全队当前电力储量
 func power_of(team: int) -> float:
@@ -465,6 +520,8 @@ func _load_unit_db() -> void:
 func _setup_units() -> void:
 	if unit_db == null:
 		_load_unit_db()
+	if unit_db != null and unit_db.has("feifei"):
+		selected_unit = unit_db.order.find("feifei")
 	for spec in START_UNITS:
 		var def: Dictionary = unit_db.get_def(str(spec["id"]))
 		if def.is_empty():
@@ -501,6 +558,8 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 		return place_building_at(def_id, cell, team)
 	controller.build_here_provider = func(def_id: String) -> String:
 		return build_near(def_id, unit.global_position, team)
+	controller.place_provider = func(kind: String, cell: Vector3i) -> String:
+		return place_block_for(unit, kind, cell)
 	unit.gun_fired.connect(_on_gun_fired)
 	unit.block_dug.connect(_on_block_dug)
 	controller.bind(unit, code, 1)
@@ -919,13 +978,17 @@ func _refresh_enemy_sensors() -> void:
 		if not self_unit.alive:
 			continue
 		var enemy_team: int = TEAM_BLUE if int(entry.get("team", TEAM_BLUE)) == TEAM_RED else TEAM_RED
+		var my_team: int = int(entry.get("team", TEAM_BLUE))
+		var sensor_range: float = self_unit.radar_unit_range
+		if team_has_radar(my_team):
+			sensor_range = maxf(sensor_range, team_radar_range(my_team))
 		var found: Array = []
 		for other in team_units(enemy_team):
 			var o: RigidBody3D = other["unit"]
 			if not o.alive:
 				continue
 			var dist: float = self_unit.global_position.distance_to(o.global_position)
-			if dist > self_unit.radar_unit_range:
+			if dist > sensor_range:
 				continue
 			found.append({
 				"x": o.global_position.x,
@@ -1276,6 +1339,10 @@ func _tick_buildings(delta: float) -> void:
 			_run_powerplant(node, def)
 		elif kind == "turret":
 			_run_turret(node, def)
+		elif kind == "radar":
+			_run_radar(node, def)
+		elif kind == "repairbay":
+			_run_repairbay(node, def)
 
 
 func _mine_with(node, def: Dictionary) -> void:
@@ -1374,6 +1441,45 @@ func _produce_unit(node) -> void:
 ## 各队伍的预设代码：蓝方是"指挥官"AI（造建筑 + 滚雪球），红方是简单的战斗 AI
 func _preset_code_for(team: int) -> String:
 	return DefaultCode.COMMANDER_SOURCE
+
+
+## 按单位类型选预设代码（工厂产出的单位也用这个）
+func _preset_for_unit(def: Dictionary) -> String:
+	var uid := str(def.get("id", ""))
+	if uid == "builder":
+		return DefaultCode.BUILDER_SOURCE
+	if uid == "scout":
+		return DefaultCode.SCOUT_SOURCE
+	if uid == "rover":
+		return DefaultCode.ROVER_SOURCE
+	if uid == "feifei":
+		return DefaultCode.FLYER_SOURCE
+	return DefaultCode.COMMANDER_SOURCE
+
+
+## 单位按代码在指定格放一块方块：要扣资源和电量，非法位置返回错误字符串
+func place_block_for(unit: RigidBody3D, kind: String, cell: Vector3i) -> String:
+	if world == null or db == null:
+		return "世界还没准备好"
+	var block_id: int = db.id_of(kind)
+	if block_id == 0:
+		return "没有叫 %s 的方块" % kind
+	if not world.in_bounds(cell):
+		return "超出地图范围"
+	if not world.is_buildable(cell):
+		return "这里不让建造"
+	if world.get_block(cell) != 0:
+		return "这格已经有方块了"
+	if unit.energy_j < 800.0:
+		return "电量不足"
+	var team_economy = _economy_for(int(unit.team))
+	# 自然方块（土/草/沙）免费，加工过的方块要 1 铜
+	var material_cost := 0 if kind in ["dirt", "grass", "sand"] else 1
+	if material_cost > 0 and not team_economy.spend({"copper": material_cost}):
+		return "铜不够（需要 %d）" % material_cost
+	unit.energy_j -= 800.0
+	world.set_block(cell, block_id)
+	return ""
 
 
 func team_units(team: int) -> Array:
@@ -1741,7 +1847,7 @@ func _place_unit() -> void:
 	at.z = clampf(at.z, 1.0, float(world.size_z) - 2.0)
 	var ground := world.surface_height(floori(at.x), floori(at.z))
 	economy.spend(cost)
-	var code: String = DefaultCode.ROVER_SOURCE if str(def.get("id", "")) == "rover" else _preset_code_for(TEAM_BLUE)
+	var code: String = _preset_for_unit(def)
 	_spawn_unit(def, Vector3(at.x, float(ground), at.z), code)
 	hud.show_message("放下%s（共 %d 台）" % [str(def.get("display_name", "单位")), units.size()])
 	_refresh_hud()

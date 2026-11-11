@@ -16,7 +16,7 @@ const MAX_REPEAT := 1000000
 const BUILTINS := [
 	"print", "set_drive", "set_spin", "set_steer", "set_thrust", "get_link",
 	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot", "go_to", "stop", "find_path", "set_velocity", "set_altitude",
-	"build", "build_here",
+	"build", "build_here", "place",
 	"range", "len", "abs", "min", "max", "int", "float", "str", "round", "bool",
 ]
 
@@ -36,6 +36,7 @@ var path_provider: Callable = Callable()
 ## 建筑：build(id, x, y, z) 与 build_here(id)，返回错误字符串（空串表示成功）
 var build_provider: Callable = Callable()
 var build_here_provider: Callable = Callable()
+var place_provider: Callable = Callable()
 var logs: Array = []
 var error := ""
 var finished := false
@@ -977,6 +978,14 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			if build_here_provider.is_valid():
 				err2 = str(build_here_provider.call(str(args[0])))
 			stack.append(err2)
+			return true
+		"place":
+			if args.size() != 4 or not _is_str(args[0]) or not _is_num(args[1]) or not _is_num(args[2]) or not _is_num(args[3]):
+				return _fail("TypeError", "place(方块名, x, y, z)：在指定格子放一块方块", op, ins)
+			var place_err := ""
+			if place_provider.is_valid():
+				place_err = str(place_provider.call(str(args[0]), Vector3i(int(args[1]), int(args[2]), int(args[3]))))
+			stack.append(place_err)
 			return true
 		"find_path":
 			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):

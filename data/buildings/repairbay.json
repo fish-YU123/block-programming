@@ -1,0 +1,25 @@
+{
+  "id": "repairbay",
+  "display_name": "维修厂",
+  "build_seconds": 8.0,
+  "kind": "repairbay",
+  "size": [
+    2,
+    2,
+    2
+  ],
+  "cost": {
+    "copper": 28,
+    "iron": 10
+  },
+  "hp": 200.0,
+  "period": 1.0,
+  "radius": 12.0,
+  "heal": 6.0,
+  "power_draw": 8.0,
+  "color": [
+    0.4,
+    0.9,
+    0.6
+  ]
+}
