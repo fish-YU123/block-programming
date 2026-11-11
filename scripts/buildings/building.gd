@@ -370,6 +370,54 @@ func _build_visual() -> void:
 		vent.position = Vector3(0.0, sy + 0.18, 0.0)
 		add_child(vent)
 
+	elif kind == "commandpost":
+		# 指挥中心：尖顶塔 + 顶部信号灯
+		var tower := MeshInstance3D.new()
+		var tower_mesh := CylinderMesh.new()
+		tower_mesh.top_radius = 0.1
+		tower_mesh.bottom_radius = sx * 0.3
+		tower_mesh.height = sy * 1.3
+		tower.mesh = tower_mesh
+		tower.material_override = body_mat
+		tower.position = Vector3(0.0, sy * 0.75, 0.0)
+		add_child(tower)
+		var beacon := MeshInstance3D.new()
+		var beacon_mesh := SphereMesh.new()
+		beacon_mesh.radius = sx * 0.12
+		beacon_mesh.height = sx * 0.24
+		beacon.mesh = beacon_mesh
+		beacon.material_override = glow_mat
+		beacon.position = Vector3(0.0, sy * 1.45, 0.0)
+		add_child(beacon)
+		_core = beacon
+	elif kind == "shield":
+		# 护盾发生器：中间一个大圆球罩
+		var dome := MeshInstance3D.new()
+		var dome_mesh := SphereMesh.new()
+		dome_mesh.radius = sx * 0.34
+		dome_mesh.height = sx * 0.68
+		dome.mesh = dome_mesh
+		var dome_mat: StandardMaterial3D = MatCache.of(Color(0.5, 0.8, 1.0), true, 0.7, true, 0.35)
+		dome.material_override = dome_mat
+		dome.position = Vector3(0.0, sy * 0.55, 0.0)
+		add_child(dome)
+		_core = dome
+	elif kind == "jammertower":
+		# 干扰塔：三圈旋转的环
+		var last_ring: MeshInstance3D = null
+		for i in 3:
+			var ring_i := MeshInstance3D.new()
+			var ring_mesh := TorusMesh.new()
+			ring_mesh.inner_radius = sx * (0.16 + 0.05 * float(i))
+			ring_mesh.outer_radius = sx * (0.2 + 0.05 * float(i))
+			ring_i.mesh = ring_mesh
+			ring_i.material_override = glow_mat
+			ring_i.rotation.x = PI * 0.5 * float(i) * 0.4
+			ring_i.position = Vector3(0.0, sy * (0.5 + 0.2 * float(i)), 0.0)
+			add_child(ring_i)
+			last_ring = ring_i
+		_ring = last_ring
+
 	# 碰撞体（占满整个格子，单位撞不进去）
 	var body := StaticBody3D.new()
 	var shape := CollisionShape3D.new()

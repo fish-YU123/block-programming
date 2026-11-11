@@ -1,0 +1,39 @@
+{
+  "id": "gunship",
+  "display_name": "炮艇",
+  "hint": "重装炮艇：血厚、炮狠，飞得慢，专门拆家和点杀",
+  "cost": {
+    "copper": 40,
+    "steel": 12
+  },
+  "size": 1.5,
+  "hp": 240.0,
+  "mass": 40.0,
+  "energy_j": 900000.0,
+  "hover_thrust_n": 1500.0,
+  "rcs_thrust_n": 120.0,
+  "gimbal_deg": 18.0,
+  "radar_radius": 2,
+  "drill": {
+    "reach": 1.8,
+    "cooldown": 0.3,
+    "power_w": 500.0
+  },
+  "idle_power_w": 80.0,
+  "lift_power_w": 900.0,
+  "rcs_power_w": 160.0,
+  "radar_unit_range": 12.0,
+  "laser": {
+    "reach": 8.0,
+    "dps_block": 120.0,
+    "dps_unit": 60.0,
+    "power_w": 1100.0
+  },
+  "gun": {
+    "reach": 22.0,
+    "cooldown": 0.9,
+    "damage_block": 110.0,
+    "damage_unit": 95.0,
+    "energy_j": 3000.0
+  }
+}

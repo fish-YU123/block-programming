@@ -226,16 +226,22 @@ func _damage_building(node: Node3D, amount: float) -> void:
 		return
 	if not node.has_method("take_damage"):
 		return
+	if shield_absorbs(int(node.team), node.center_world()):
+		return
 	node.take_damage(amount)
 	if node.hp <= 0.0:
 		_remove_building(node)
 
+
+var command_lost: Array = [false, false]   ## 每队指挥中心有没有被拆掉
 
 func _remove_building(node: Node3D) -> void:
 	for i in range(buildings.size() - 1, -1, -1):
 		if buildings[i]["node"] == node:
 			buildings.remove_at(i)
 			break
+	if str(node.def.get("id", "")) == "commandpost" and int(node.team) >= 0 and int(node.team) < 2:
+		command_lost[int(node.team)] = true
 	if node.get_parent() != null:
 		node.get_parent().remove_child(node)
 	node.queue_free()
@@ -425,6 +431,27 @@ func _run_repairbay(node, def: Dictionary) -> void:
 		node.produced += 1
 
 
+## 坐标是否被本队护盾罩住；罩住就按伤害消耗电力来吸收
+func shield_absorbs(team: int, point: Vector3) -> bool:
+	for entry in buildings:
+		var node = entry["node"]
+		if not is_instance_valid(node) or not node.alive or int(node.team) != team:
+			continue
+		if str(entry["id"]) != "shield":
+			continue
+		if node.is_under_construction() or node.is_stalled():
+			continue
+		var radius := float(building_db.get_def("shield").get("radius", 16.0))
+		if node.center_world().distance_to(point) > radius:
+			continue
+		# 吸收一发要电
+		if not use_power(team, 8.0):
+			node.set_stalled_look(true)
+			return false
+		return true
+	return false
+
+
 ## 全队当前电力储量
 func power_of(team: int) -> float:
 	return float(power_pool.get(team, 0.0))
@@ -496,7 +523,8 @@ func _run_turret(node, def: Dictionary) -> void:
 		return
 	node.set_stalled_look(false)
 	node.face_target(target.global_position)
-	target.take_damage(float(def.get("damage", 42.0)))
+	if not shield_absorbs(int(target.team), target.global_position):
+		target.take_damage(float(def.get("damage", 42.0)))
 	node.produced += 1
 
 
@@ -857,6 +885,7 @@ func _physics_process(delta: float) -> void:
 		controller.tick(delta)
 	# 武器：发育时间里也能挖方块（只对单位断伤）；贴身钻头战斗只在开打后结算
 	_process_cargo_transfers(delta)
+	_refresh_jamming()
 	_process_weapons(delta)
 	if not in_peace():
 		_process_combat(delta)
@@ -990,7 +1019,8 @@ func _on_gun_fired(u: RigidBody3D, from: Vector3, dir: Vector3) -> void:
 	elif not unit_hit.is_empty():
 		end = unit_hit["point"]
 		var victim: RigidBody3D = unit_hit["unit"]
-		victim.take_damage(u.gun_damage_unit)
+		if not shield_absorbs(int(victim.team), victim.global_position):
+			victim.take_damage(u.gun_damage_unit)
 	elif not block_hit.is_empty():
 		end = block_hit["point"]
 		_damage_block(block_cell, u.gun_damage_block, int(u.team))
@@ -1048,6 +1078,34 @@ func block_damage_at(cell: Vector3i) -> float:
 
 
 ## 把敌方单位的位置塞给每个单位的传感器（10 米内，按距离排序，最近的前 8 个）
+## 敌方干扰塔覆盖到的单位，代码执行速度减半
+func _refresh_jamming() -> void:
+	var jammers: Array = []
+	for entry in buildings:
+		var node = entry["node"]
+		if not is_instance_valid(node) or not node.alive:
+			continue
+		if str(entry["id"]) != "jammertower" or node.is_under_construction():
+			continue
+		if node.is_stalled():
+			continue
+		jammers.append(node)
+	for entry in units:
+		var unit: RigidBody3D = entry["unit"]
+		var controller: UnitController = entry["controller"]
+		if not is_instance_valid(unit) or not unit.alive:
+			continue
+		var rate := 1.0
+		for jammer in jammers:
+			if int(jammer.team) == int(unit.team):
+				continue
+			var radius := float(building_db.get_def("jammertower").get("radius", 18.0))
+			if jammer.center_world().distance_to(unit.global_position) <= radius:
+				rate = float(building_db.get_def("jammertower").get("slow", 0.5))
+				break
+		controller.line_rate = rate
+
+
 func _refresh_enemy_sensors() -> void:
 	for entry in units:
 		var self_unit: RigidBody3D = entry["unit"]
@@ -1422,6 +1480,11 @@ func _tick_buildings(delta: float) -> void:
 			_run_repairbay(node, def)
 		elif kind == "refinery":
 			_run_refinery(node, def)
+		elif kind == "shield" or kind == "jammertower":
+			if not use_power(int(node.team), float(def.get("power_draw", 12.0))):
+				node.set_stalled_look(true)
+			else:
+				node.set_stalled_look(false)
 
 
 func _mine_with(node, def: Dictionary) -> void:
@@ -1531,6 +1594,8 @@ func _preset_for_unit(def: Dictionary) -> String:
 		return DefaultCode.SCOUT_SOURCE
 	if uid == "cargo":
 		return DefaultCode.CARGO_SOURCE
+	if uid == "gunship":
+		return DefaultCode.GUNSHIP_SOURCE
 	if uid == "rover":
 		return DefaultCode.ROVER_SOURCE
 	if uid == "feifei":
@@ -1611,9 +1676,9 @@ func _check_victory() -> void:
 		return
 	if _physics_frames < 30:
 		return  # 开局 0.5 秒内不判负，等代码跑起来
-	if team_units(TEAM_RED).is_empty():
+	if command_lost[TEAM_RED] or team_units(TEAM_RED).is_empty():
 		game_over = "蓝方胜利"
-	elif team_units(TEAM_BLUE).is_empty():
+	elif command_lost[TEAM_BLUE] or team_units(TEAM_BLUE).is_empty():
 		game_over = "红方胜利"
 	if game_over != "":
 		hud.show_overlay(game_over + "\n按 R 重开")

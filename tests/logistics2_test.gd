@@ -59,7 +59,7 @@ func _flat(near: Vector2i, sx: int, sz: int) -> Vector3i:
 
 func _run() -> void:
 	_record("单位表里有货运飞飞", _main.unit_db.has("cargo"))
-	_record("建筑表有 11 种", _main.building_db.order.size() == 11, str(_main.building_db.order.size()))
+	_record("建筑表有 14 种", _main.building_db.order.size() == 14, str(_main.building_db.order.size()))
 	_record("建筑表含仓库/精炼厂/车辆厂", _main.building_db.has("storage") and _main.building_db.has("refinery") and _main.building_db.has("vehiclefactory"))
 	_main.economy.add("copper", 400)
 	_main.economy.add("iron", 200)

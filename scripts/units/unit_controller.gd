@@ -14,6 +14,7 @@ var unit: Node3D
 var source := ""
 var revision := 0
 var logs: Array = []
+var line_rate := 1.0   ## 代码执行速度倍率（被敌方干扰塔压制时会降到 0.5）
 
 var enemies: Array = []
 var orders: Array = []
@@ -134,7 +135,7 @@ func tick(delta: float) -> void:
 		return
 	_elapsed += delta
 	_inject_sensors(false)
-	_budget += delta * LINES_PER_SECOND
+	_budget += delta * LINES_PER_SECOND * line_rate
 	var steps := mini(int(_budget), MAX_STEPS_PER_FRAME)
 	for i in steps:
 		_budget -= 1.0

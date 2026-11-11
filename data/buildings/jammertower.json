@@ -1,0 +1,25 @@
+{
+  "id": "jammertower",
+  "display_name": "干扰塔",
+  "build_seconds": 10.0,
+  "kind": "jammertower",
+  "size": [
+    2,
+    3,
+    2
+  ],
+  "cost": {
+    "copper": 50,
+    "steel": 15
+  },
+  "hp": 200.0,
+  "period": 1.0,
+  "radius": 18.0,
+  "power_draw": 12.0,
+  "slow": 0.5,
+  "color": [
+    0.7,
+    0.45,
+    0.9
+  ]
+}

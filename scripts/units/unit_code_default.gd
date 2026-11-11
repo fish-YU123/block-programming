@@ -15,6 +15,7 @@ const CommanderPreset = preload("res://scripts/units/presets/commander_preset.gd
 const BuilderPreset = preload("res://scripts/units/presets/builder_preset.gd")
 const ScoutPreset = preload("res://scripts/units/presets/scout_preset.gd")
 const CargoPreset = preload("res://scripts/units/presets/cargo_preset.gd")
+const GunshipPreset = preload("res://scripts/units/presets/gunship_preset.gd")
 const RoverPreset = preload("res://scripts/units/presets/rover_preset.gd")
 
 const FLYER_SOURCE := FlyerPreset.SOURCE
@@ -24,4 +25,5 @@ const COMMANDER_SOURCE := CommanderPreset.SOURCE
 const BUILDER_SOURCE := BuilderPreset.SOURCE
 const SCOUT_SOURCE := ScoutPreset.SOURCE
 const CARGO_SOURCE := CargoPreset.SOURCE
+const GUNSHIP_SOURCE := GunshipPreset.SOURCE
 const ROVER_SOURCE := RoverPreset.SOURCE

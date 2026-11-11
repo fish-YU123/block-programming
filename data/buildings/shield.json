@@ -1,0 +1,25 @@
+{
+  "id": "shield",
+  "display_name": "护盾发生器",
+  "build_seconds": 10.0,
+  "kind": "shield",
+  "size": [
+    2,
+    3,
+    2
+  ],
+  "cost": {
+    "copper": 60,
+    "steel": 20
+  },
+  "hp": 220.0,
+  "period": 1.0,
+  "radius": 16.0,
+  "power_draw": 20.0,
+  "absorb_per_power": 12.0,
+  "color": [
+    0.45,
+    0.75,
+    1.0
+  ]
+}
