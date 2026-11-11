@@ -297,6 +297,81 @@ func _ray_aabb(from: Vector3, dir: Vector3, bmin: Vector3, bmax: Vector3) -> flo
 
 const POWER_BASE_CAP := 120.0
 
+const BASE_RESOURCE_CAP := 400.0
+const STORAGE_CAP_BONUS := 600.0
+
+## 每队资源上限：基础 400，每座仓库 +600
+func storage_cap(team: int) -> int:
+	var cap := BASE_RESOURCE_CAP
+	for entry in buildings:
+		var node = entry["node"]
+		if not is_instance_valid(node) or not node.alive or int(node.team) != team:
+			continue
+		if str(entry["id"]) == "storage" and not node.is_under_construction():
+			cap += int(STORAGE_CAP_BONUS)
+	return int(cap)
+
+
+## 把上限套到两队经济账本上（仓库建好/被拆后自动变化）
+func _sync_economy_caps() -> void:
+	for team in [TEAM_BLUE, TEAM_RED]:
+		var cap := storage_cap(team)
+		var table := {"copper": cap, "coal": cap, "iron": cap, "gold": cap, "steel": cap, "battery": cap}
+		_economy_for(team).set_caps(table)
+
+
+## 精炼厂：铁矿 + 煤 → 钢
+func _run_refinery(node, def: Dictionary) -> void:
+	var team_economy = _economy_for(int(node.team))
+	if not use_power(int(node.team), float(def.get("power_draw", 15.0))):
+		node.set_stalled_look(true)
+		return
+	var inputs: Dictionary = def.get("inputs", {})
+	var outputs: Dictionary = def.get("outputs", {})
+	if not team_economy.spend(inputs):
+		node.set_stalled_look(true)
+		return
+	node.set_stalled_look(false)
+	for kind in outputs.keys():
+		team_economy.add(str(kind), int(outputs[kind]))
+	node.produced += 1
+
+
+## 货运飞飞：把自身电量输送给附近缺电的友军
+func _process_cargo_transfers(delta: float) -> void:
+	if in_peace():
+		return
+	for entry in units:
+		var carrier: RigidBody3D = entry["unit"]
+		if not is_instance_valid(carrier) or not carrier.alive:
+			continue
+		if not bool(carrier.controls.get("transfer", false)):
+			continue
+		var budget: float = carrier.transfer_rate_j * delta
+		if budget <= 0.0:
+			continue
+		for other in units:
+			if budget <= 0.01 or carrier.energy_j <= 0.0:
+				break
+			var target: RigidBody3D = other["unit"]
+			if target == carrier or not is_instance_valid(target) or not target.alive:
+				continue
+			if int(target.team) != int(carrier.team):
+				continue
+			if target.energy_j >= target.energy_max:
+				continue
+			if carrier.global_position.distance_to(target.global_position) > carrier.transfer_radius:
+				continue
+			var give: float = minf(budget, target.energy_max - target.energy_j)
+			give = minf(give, carrier.energy_j)
+			if give <= 0.0:
+				continue
+			target.energy_j += give
+			target.energy_out = target.energy_j <= 0.0
+			carrier.energy_j -= give
+			budget -= give
+
+
 ## 队伍里有没有通电的雷达站（有就共享视野）
 func team_has_radar(team: int) -> bool:
 	for entry in buildings:
@@ -781,6 +856,7 @@ func _physics_process(delta: float) -> void:
 			controller.set_resources(team_res)
 		controller.tick(delta)
 	# 武器：发育时间里也能挖方块（只对单位断伤）；贴身钻头战斗只在开打后结算
+	_process_cargo_transfers(delta)
 	_process_weapons(delta)
 	if not in_peace():
 		_process_combat(delta)
@@ -1302,6 +1378,7 @@ func _remove_last_building() -> void:
 
 
 func _tick_buildings(delta: float) -> void:
+	_sync_economy_caps()
 	for entry in buildings:
 		var node = entry["node"]
 		if not is_instance_valid(node):
@@ -1343,6 +1420,8 @@ func _tick_buildings(delta: float) -> void:
 			_run_radar(node, def)
 		elif kind == "repairbay":
 			_run_repairbay(node, def)
+		elif kind == "refinery":
+			_run_refinery(node, def)
 
 
 func _mine_with(node, def: Dictionary) -> void:
@@ -1450,6 +1529,8 @@ func _preset_for_unit(def: Dictionary) -> String:
 		return DefaultCode.BUILDER_SOURCE
 	if uid == "scout":
 		return DefaultCode.SCOUT_SOURCE
+	if uid == "cargo":
+		return DefaultCode.CARGO_SOURCE
 	if uid == "rover":
 		return DefaultCode.ROVER_SOURCE
 	if uid == "feifei":

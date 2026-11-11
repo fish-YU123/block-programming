@@ -1,0 +1,30 @@
+{
+  "id": "refinery",
+  "display_name": "精炼厂",
+  "build_seconds": 10.0,
+  "kind": "refinery",
+  "size": [
+    3,
+    2,
+    3
+  ],
+  "cost": {
+    "copper": 35,
+    "iron": 20
+  },
+  "hp": 260.0,
+  "period": 5.0,
+  "inputs": {
+    "iron": 2,
+    "coal": 2
+  },
+  "outputs": {
+    "steel": 1
+  },
+  "power_draw": 15.0,
+  "color": [
+    0.55,
+    0.6,
+    0.7
+  ]
+}

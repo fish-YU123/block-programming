@@ -54,6 +54,8 @@ var gun_damage_unit := 34.0
 var gun_energy_j := 2400.0
 ## 雷达能看到的敌方单位数量上限与距离
 var radar_unit_range := 10.0
+var transfer_radius := 8.0
+var transfer_rate_j := 12000.0
 var idle_power_w := 180.0
 var lift_power_w := 1500.0
 var rcs_power_w := 420.0
@@ -123,6 +125,8 @@ func setup(world_node: Node3D, def: Dictionary) -> void:
 	gun_damage_unit = float(gun.get("damage_unit", 34.0))
 	gun_energy_j = float(gun.get("energy_j", 2400.0))
 	radar_unit_range = float(def.get("radar_unit_range", 10.0))
+	transfer_radius = float(def.get("transfer_radius", 8.0))
+	transfer_rate_j = float(def.get("transfer_rate_j", 12000.0))
 
 	mass = mass_kg
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM

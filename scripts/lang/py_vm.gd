@@ -16,7 +16,7 @@ const MAX_REPEAT := 1000000
 const BUILTINS := [
 	"print", "set_drive", "set_spin", "set_steer", "set_thrust", "get_link",
 	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot", "go_to", "stop", "find_path", "set_velocity", "set_altitude",
-	"build", "build_here", "place",
+	"build", "build_here", "place", "transfer",
 	"range", "len", "abs", "min", "max", "int", "float", "str", "round", "bool",
 ]
 
@@ -25,7 +25,7 @@ const DEFAULT_CONTROLS := {
 	"laser": false, "laser_x": 0.0, "laser_y": 0.0, "laser_z": 0.0,
 	"shoot": false, "shoot_x": 0.0, "shoot_y": 0.0, "shoot_z": 0.0,
 	"go": false, "go_x": 0.0, "go_y": 0.0, "go_z": 0.0,
-	"vel_mode": false, "vx": 0.0, "vz": 0.0,
+	"vel_mode": false, "vx": 0.0, "vz": 0.0, "transfer": false,
 	"alt_mode": false, "alt_target": 0.0,
 }
 
@@ -978,6 +978,18 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			if build_here_provider.is_valid():
 				err2 = str(build_here_provider.call(str(args[0])))
 			stack.append(err2)
+			return true
+		"transfer":
+			if args.size() != 1:
+				return _fail("TypeError", "transfer(开/关)：开启后把电输送给附近友军", op, ins)
+			var flag = args[0]
+			var on := false
+			if flag is bool:
+				on = flag
+			elif _is_num(flag):
+				on = float(flag) != 0.0
+			state["controls"]["transfer"] = on
+			stack.append(null)
 			return true
 		"place":
 			if args.size() != 4 or not _is_str(args[0]) or not _is_num(args[1]) or not _is_num(args[2]) or not _is_num(args[3]):

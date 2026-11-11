@@ -1,0 +1,23 @@
+{
+  "id": "storage",
+  "display_name": "仓库",
+  "build_seconds": 8.0,
+  "kind": "storage",
+  "size": [
+    2,
+    2,
+    2
+  ],
+  "cost": {
+    "copper": 20,
+    "coal": 10
+  },
+  "hp": 180.0,
+  "period": 1.0,
+  "capacity": 600.0,
+  "color": [
+    0.65,
+    0.6,
+    0.45
+  ]
+}

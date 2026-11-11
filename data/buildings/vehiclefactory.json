@@ -1,0 +1,23 @@
+{
+  "id": "vehiclefactory",
+  "display_name": "车辆厂",
+  "build_seconds": 12.0,
+  "kind": "factory",
+  "size": [
+    3,
+    3,
+    3
+  ],
+  "cost": {
+    "copper": 55,
+    "steel": 15
+  },
+  "hp": 340.0,
+  "period": 14.0,
+  "unit": "rover",
+  "color": [
+    0.85,
+    0.7,
+    0.3
+  ]
+}

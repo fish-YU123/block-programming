@@ -6,6 +6,7 @@ signal changed(resources: Dictionary)
 
 var _block_db = null            ## 方块定义表（block_db.gd 实例）
 var _amounts: Dictionary = {}   ## 资源名 -> 数量（整数）
+var caps: Dictionary = {}       ## 资源名 -> 上限（没有条目表示不限）
 
 
 func setup(block_db, starting: Dictionary = {}) -> void:
@@ -30,11 +31,19 @@ func all() -> Dictionary:
 
 
 func add(kind: String, count: int) -> void:
-	## 加资源；数量 <= 0 时直接忽略
+	## 加资源；数量 <= 0 时直接忽略；有上限时会被截断
 	if kind == "" or count <= 0:
 		return
-	_amounts[kind] = amount(kind) + count
+	var next := amount(kind) + count
+	if caps.has(kind):
+		next = mini(next, int(caps[kind]))
+	_amounts[kind] = next
 	changed.emit(all())
+
+
+## 设置资源上限（仓库会抬高它）
+func set_caps(value: Dictionary) -> void:
+	caps = value
 
 
 func can_afford(cost: Dictionary) -> bool:

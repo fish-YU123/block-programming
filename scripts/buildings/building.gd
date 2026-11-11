@@ -340,6 +340,36 @@ func _build_visual() -> void:
 		bar_b.position = Vector3(0.0, sy + 0.2, 0.0)
 		add_child(bar_b)
 
+	elif kind == "storage":
+		# 仓库：三层货箱
+		for i in 3:
+			var crate := MeshInstance3D.new()
+			var crate_mesh := BoxMesh.new()
+			crate_mesh.size = Vector3(sx * 0.55, sy * 0.22, sz * 0.55)
+			crate.mesh = crate_mesh
+			crate.material_override = frame_mat if i % 2 == 0 else body_mat
+			crate.position = Vector3(0.0, sy * (0.2 + float(i) * 0.28), 0.0)
+			add_child(crate)
+	elif kind == "refinery":
+		# 精炼厂：粗管道 + 顶部出料口
+		for i in 2:
+			var pipe := MeshInstance3D.new()
+			var pipe_mesh := CylinderMesh.new()
+			pipe_mesh.top_radius = 0.16
+			pipe_mesh.bottom_radius = 0.22
+			pipe_mesh.height = sy * 1.1
+			pipe.mesh = pipe_mesh
+			pipe.material_override = frame_mat
+			pipe.position = Vector3(-sx * 0.2 + float(i) * sx * 0.4, sy * 0.8, -sz * 0.15)
+			add_child(pipe)
+		var vent := MeshInstance3D.new()
+		var vent_mesh := BoxMesh.new()
+		vent_mesh.size = Vector3(sx * 0.4, 0.14, sz * 0.4)
+		vent.mesh = vent_mesh
+		vent.material_override = glow_mat
+		vent.position = Vector3(0.0, sy + 0.18, 0.0)
+		add_child(vent)
+
 	# 碰撞体（占满整个格子，单位撞不进去）
 	var body := StaticBody3D.new()
 	var shape := CollisionShape3D.new()

@@ -175,6 +175,7 @@ func tick(delta: float) -> void:
 		"vz": float(controls.get("vz", 0.0)),
 		"alt_mode": bool(controls.get("alt_mode", false)),
 		"alt_target": float(controls.get("alt_target", 0.0)),
+		"transfer": bool(controls.get("transfer", false)),
 	}
 	# 自动驾驶指令：go_to(x,y,z) / stop()
 	var go := bool(controls.get("go", false))
