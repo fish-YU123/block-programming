@@ -64,6 +64,21 @@ func _spawn(unit_id: String, at: Vector3, team: int) -> RigidBody3D:
 
 
 func _run() -> void:
+	# 每种单位的预设代码都能编译
+	var preset_bad: Array = []
+	for uid in _main.unit_db.order:
+		var udef: Dictionary = _main.unit_db.get_def(str(uid))
+		var code: String = str(_main._preset_for_unit(udef))
+		var vm_script = load("res://scripts/lang/py_vm.gd")
+		var perr := ""
+		if vm_script != null and code != "":
+			var vm = vm_script.new()
+			vm.load_source(code)
+			perr = str(vm.error)
+		if perr != "":
+			preset_bad.append("%s:%s" % [str(uid), perr])
+	_record("12 种单位的预设都能编译", preset_bad.is_empty(), str(preset_bad))
+
 	_record("单位表 12 种", _main.unit_db.order.size() == 12, str(_main.unit_db.order.size()))
 	_record("建筑表 15 种", _main.building_db.order.size() == 15, str(_main.building_db.order.size()))
 

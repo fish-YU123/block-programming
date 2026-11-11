@@ -121,8 +121,24 @@ docs/              预览图与玩家/开发文档
 - 血量 320、抗揍；不能飞，适合钻矿和贴地推进
 - 造价：铜 45 + 铁 15
 
+
+### 其余 10 种单位（按 T 切换后 F 放置）
+
+| 单位 | 造价 | 定位 |
+| --- | --- | --- |
+| 建筑工 builder | 铜 22 煤 6 | 唯一能用 `place(方块,x,y,z)` 改世界的单位 |
+| 侦察机 scout | 铜 14 煤 4 | 雷达 26 格、速度快、不打架 |
+| 货运飞飞 cargo | 铜 16 煤 6 | `transfer(True)` 把自身电量输给 8 格内友军 |
+| 炮艇 gunship | 铜 40 钢 12 | 22 格炮 + 8 格激光，正面推进 |
+| 自爆无人机 kamikaze | 铜 12 煤 4 | 贴近敌人自动爆炸（6 米 150 伤） |
+| 布雷车 minelayer | 铜 30 铁 12 | 每 2 秒沿路埋一颗雷 |
+| 维修无人机 repair | 铜 24 铁 10 | 半径 9 内友军回血 14/秒 |
+| 干扰机 jammer | 铜 28 钢 8 | 移动干扰塔，敌方代码速度 ×0.55 |
+| 钻地机 burrower | 铜 34 铁 16 | 4 格长钻头 + 6 格激光，专挖矿脉 |
+| 平台无人机 carrier | 铜 45 钢 18 | 半径 14 给友军回电 9000 J/秒 |
+
 玩家代码可用传感器：`pos` `vel` `cell` `yaw` `energy` `energy_ratio` `thrust` `drill_hits` `hp` `hp_ratio` `team` `peace` `t` `res` `leader` `blocks[5][5]` `heights[5][5]` `blocks3[5][5][5]` `here` `below` `ore` `orders` `enemies`；
-控制接口：`set_lift(0~1)` `set_tilt(前后, 左右)` `set_rcs(转向, 前后)` `set_velocity(vx, vz)` `set_altitude(y)` `drill(开关)` `laser(x,y,z)` `laser_off()` `shoot(x,y,z)` `find_path(x,y,z)` `go_to(x,y,z)` `stop()` `build(id,x,y,z)` `build_here(id)`。
+控制接口：`set_lift(0~1)` `set_tilt(前后, 左右)` `set_rcs(转向, 前后)` `set_velocity(vx, vz)` `set_altitude(y)` `drill(开关)` `laser(x,y,z)` `laser_off()` `shoot(x,y,z)` `find_path(x,y,z)` `go_to(x,y,z)` `stop()` `build(id,x,y,z)` `build_here(id)` `place(方块,x,y,z)` `transfer(开/关)`。
 完整说明见 `docs/单位编程手册.md` 与 `docs/飞飞快速上手.md`。
 
 ### 预设 AI

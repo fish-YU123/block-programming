@@ -21,7 +21,10 @@ def loop():
         set_velocity(0.0, 0.0)
         return
     # 没活干就朝对面矿脉方向慢慢钻
-    set_velocity(6.0 if pos.x < 128 else -6.0, 0.0)
+    if pos.x < 128:
+        set_velocity(6.0, 0.0)
+    else:
+        set_velocity(-6.0, 0.0)
     set_altitude(地面 + 2.5)
     drill(True)
 """

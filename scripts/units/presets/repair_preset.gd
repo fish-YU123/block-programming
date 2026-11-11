@@ -11,7 +11,10 @@ def loop():
     地面 = heights[2][2]
     if len(enemies) > 0 and enemies[0].dist < 10.0:
         # 有敌人就先撤
-        set_velocity(-14.0 if pos.x < 128 else 14.0, 0.0)
+        if pos.x < 128:
+            set_velocity(-14.0, 0.0)
+        else:
+            set_velocity(14.0, 0.0)
     else:
         set_velocity(0.0, 0.0)
     set_altitude(地面 + 7.0)

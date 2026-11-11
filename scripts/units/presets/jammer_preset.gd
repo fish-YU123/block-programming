@@ -10,13 +10,19 @@ def start():
 def loop():
     地面 = heights[2][2]
     if len(enemies) == 0:
-        set_velocity(18.0 if pos.x < 128 else -18.0, 0.0)
+        if pos.x < 128:
+            set_velocity(18.0, 0.0)
+        else:
+            set_velocity(-18.0, 0.0)
         set_altitude(地面 + 12.0)
         return
     敌 = enemies[0]
     if 敌.dist > 14.0:
-        set_velocity(max(-18, min(18, (敌.x - pos.x))), max(-18, min(18, (敌.z - pos.z))))
+        set_velocity(max(-18, min(18, 敌.x - pos.x)), max(-18, min(18, 敌.z - pos.z)))
     else:
         set_velocity(0.0, 0.0)
-    set_altitude(max(地面 + 10.0, 敌.y + 5.0))
+    if 敌.y + 5.0 > 地面 + 10.0:
+        set_altitude(敌.y + 5.0)
+    else:
+        set_altitude(地面 + 10.0)
 """
