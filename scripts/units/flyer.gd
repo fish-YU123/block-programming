@@ -5,6 +5,7 @@ extends RigidBody3D
 
 const BlockDB = preload("res://scripts/world/block_db.gd")
 const MatCache = preload("res://scripts/core/mat_cache.gd")
+const UnitModels = preload("res://scripts/units/unit_models.gd")
 const StatusBadges = preload("res://scripts/ui/status_badges.gd")
 
 ## 炮管开火（主场景据此结算命中与伤害）
@@ -545,6 +546,22 @@ func _build_visual() -> void:
 	var body_mat: StandardMaterial3D = MatCache.solid("flyer_body_%d" % team, body_color)
 	var trim_mat: StandardMaterial3D = MatCache.solid("flyer_trim_%d" % team, trim_color)
 	var glass_mat: StandardMaterial3D = MatCache.solid("flyer_glass_%d" % team, Color(0.3, 0.75, 0.9), false, 1.0)
+
+	# 新单位用各自专属造型（scripts/units/unit_models.gd），飞飞/车车仍用通用机身
+	if UnitModels.is_custom(unit_id):
+		var custom := UnitModels.build(unit_id, team)
+		custom.scale = Vector3(k, k, k)
+		add_child(custom)
+		_flame = custom.get_node_or_null("Flame") as MeshInstance3D
+		_radar_dome = custom.get_node_or_null("Radar") as MeshInstance3D
+		_barrel = custom.get_node_or_null("Barrel") as MeshInstance3D
+		_rcs_jets = []
+		var custom_shape := CollisionShape3D.new()
+		var custom_box := BoxShape3D.new()
+		custom_box.size = Vector3(0.72, 0.4, 0.76) * k
+		custom_shape.shape = custom_box
+		add_child(custom_shape)
+		return
 
 	var model := Node3D.new()
 	model.name = "Model"

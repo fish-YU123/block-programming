@@ -374,6 +374,9 @@ func forward_dir() -> Vector3:
 
 func _build_visual() -> void:
 	var k := unit_size / 1.2
+	if unit_id == "minelayer":
+		_build_minelayer_visual(k)
+		return
 	var body := MeshInstance3D.new()
 	var body_mesh := BoxMesh.new()
 	body_mesh.size = Vector3(1.0, 0.45, 1.5) * k
@@ -432,3 +435,58 @@ func _build_visual() -> void:
 	shape.shape = box
 	shape.position.y = 0.05
 	add_child(shape)
+
+
+## 布雷车造型：低矮装甲车 + 尾部雷架 + 顶部警示灯
+func _build_minelayer_visual(k: float) -> void:
+	var hull := MeshInstance3D.new()
+	var hull_mesh := BoxMesh.new()
+	hull_mesh.size = Vector3(1.05, 0.34, 1.55) * k
+	hull.mesh = hull_mesh
+	hull.material_override = MatCache.solid("minelayer_hull", Color(0.28, 0.3, 0.34))
+	hull.position.y = 0.02 * k
+	add_child(hull)
+
+	var cab := MeshInstance3D.new()
+	var cab_mesh := BoxMesh.new()
+	cab_mesh.size = Vector3(0.66, 0.32, 0.5) * k
+	cab.mesh = cab_mesh
+	cab.material_override = MatCache.solid("minelayer_cab", Color(0.36, 0.42, 0.5))
+	cab.position = Vector3(0.0, 0.3 * k, -0.3 * k)
+	add_child(cab)
+
+	# 尾部雷架：三排小圆筒
+	for i in 3:
+		var holder := MeshInstance3D.new()
+		var holder_mesh := CylinderMesh.new()
+		holder_mesh.top_radius = 0.07 * k
+		holder_mesh.bottom_radius = 0.09 * k
+		holder_mesh.height = 0.16 * k
+		holder.mesh = holder_mesh
+		holder.material_override = MatCache.solid("minelayer_mine", Color(0.85, 0.32, 0.24), false, 0.3)
+		holder.position = Vector3((float(i) - 1.0) * 0.26 * k, 0.26 * k, 0.62 * k)
+		add_child(holder)
+
+	# 顶部警示灯
+	var lamp := MeshInstance3D.new()
+	var lamp_mesh := SphereMesh.new()
+	lamp_mesh.radius = 0.07 * k
+	lamp_mesh.height = 0.14 * k
+	lamp.mesh = lamp_mesh
+	lamp.material_override = MatCache.of(Color(1.0, 0.45, 0.2), true, 0.8)
+	lamp.position = Vector3(0.0, 0.5 * k, -0.3 * k)
+	add_child(lamp)
+
+	# 四个轮子
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			var wheel := MeshInstance3D.new()
+			var wheel_mesh := CylinderMesh.new()
+			wheel_mesh.top_radius = 0.24 * k
+			wheel_mesh.bottom_radius = 0.24 * k
+			wheel_mesh.height = 0.16 * k
+			wheel.mesh = wheel_mesh
+			wheel.material_override = MatCache.solid("minelayer_wheel", Color(0.12, 0.12, 0.14))
+			wheel.rotation = Vector3(0.0, 0.0, PI * 0.5)
+			wheel.position = Vector3(sx * 0.56 * k, -0.12 * k, sz * 0.5 * k)
+			add_child(wheel)
