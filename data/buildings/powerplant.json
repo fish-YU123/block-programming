@@ -16,7 +16,7 @@
   "period": 3.0,
   "fuel": "coal",
   "fuel_amount": 1,
-  "power_out": 120.0,
+  "power_out": 360.0,
   "color": [
     0.95,
     0.45,

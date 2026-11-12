@@ -121,7 +121,7 @@ def 建设():
 def 进攻():
     地面 = heights[2][2]
     # 电量低了先回基地充电站附近补电（不然飞到一半没电会掉地上等死）
-    if energy_ratio < 0.25:
+    if energy_ratio < 0.35:
         drill(False)
         laser_off()
         到(mem["家x"], mem["家z"], 18.0, 地面 + 5.0)

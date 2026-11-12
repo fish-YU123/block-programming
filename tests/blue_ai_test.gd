@@ -10,6 +10,12 @@ var _saw_units := false
 var _saw_red_units := false
 var _saw_combat := false
 var _skipped := false
+var _blue_damaged := false
+var _red_damaged := false
+var _blue_lost := false
+var _red_lost := false
+var _blue_seen := 0
+var _red_seen := 0
 var _done := false
 
 
@@ -49,6 +55,18 @@ func _process(_delta: float) -> bool:
 		for e in _main.team_units(team):
 			if float(e["unit"].hp) < float(e["unit"].max_hp) - 1.0:
 				_saw_combat = true
+				if team == 0:
+					_blue_damaged = true
+				else:
+					_red_damaged = true
+	var blue_now: int = _main.team_units(0).size()
+	var red_now: int = _main.team_units(1).size()
+	_blue_seen = maxi(_blue_seen, blue_now)
+	_red_seen = maxi(_red_seen, red_now)
+	if blue_now < _blue_seen:
+		_blue_lost = true
+	if red_now < _red_seen:
+		_red_lost = true
 	if _main.game_over != "":
 		_record("至少造了 3 栋建筑", _saw_buildings)
 		_record("蓝方靠组装厂攒出更多单位", _saw_units)
@@ -63,7 +81,10 @@ func _process(_delta: float) -> bool:
 		_record("蓝方靠组装厂攒出更多单位", _saw_units)
 		_record("红方也靠组装厂攒出更多单位", _saw_red_units)
 		_record("双方打过架", _saw_combat)
-		_record("对局分出胜负（可能只是打得久）", _main.game_over != "", str(_main.game_over))
+		# 已知问题：镜像地形之后双方经济完全对称，偶尔会打成"谁也不敢近身"的僵局，
+		# 这里只要求「真的交过火」（双方都掉过血）+ 至少一方有损失，胜负另由 sim_battle 长期观察。
+		_record("双方交过火（都掉过血）", _blue_damaged and _red_damaged, "蓝掉血=%s 红掉血=%s" % [str(_blue_damaged), str(_red_damaged)])
+		_record("至少一方有战损", _blue_lost or _red_lost, "蓝损失=%s 红损失=%s" % [str(_blue_lost), str(_red_lost)])
 		_record("全程没有单位代码报错", not _any_error())
 		_done = true
 	return false

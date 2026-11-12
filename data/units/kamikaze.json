@@ -7,7 +7,7 @@
     "coal": 4
   },
   "size": 0.7,
-  "hp": 40.0,
+  "hp": 60.0,
   "mass": 8.0,
   "energy_j": 300000.0,
   "hover_thrust_n": 520.0,
@@ -37,6 +37,6 @@
     "energy_j": 0.0
   },
   "explode_radius": 6.0,
-  "explode_damage": 150.0,
+  "explode_damage": 110.0,
   "explode_unit_range": 2.5
 }

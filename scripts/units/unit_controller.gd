@@ -240,6 +240,7 @@ func _wire_path_provider() -> void:
 func _inject_sensors(refresh_lists: bool) -> void:
 	var s: Dictionary = unit.sense()
 	var radar: Dictionary = unit.radar()
+	# peace / res / leader 这类高频、便宜的量始终刷新；只有感知列表缓存到段边界
 	if refresh_lists or _list_snapshot.is_empty():
 		var blocks3: Array = radar.get("blocks3", [])
 		_list_snapshot = {

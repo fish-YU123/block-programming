@@ -148,6 +148,13 @@ docs/              预览图与玩家/开发文档
 - `scripts/units/presets/red_preset.gd`：简单的追击 AI（早期版本，留作对照）
 - `scripts/units/presets/rover_preset.gd`：工程车示例
 
+## 平衡与调参工具
+
+- `tests/sim_battle.gd`：headless 长时间对战模拟，每 5 秒打印双方单位数、建筑数、铜/钢、电量、和平倒计时，分胜负或超时退出。
+  用法：`Godot --headless --path . --script res://tests/sim_battle.gd -- --world-seed=1 --max=240`
+- 左右半场地形与矿脉**镜像对称**（`terrain_gen.height_at` 内部把 x 折到左半场），保证 PvP 公平
+- 已调过的数值：飞飞 170 血 / 1.2 MJ / 炮 46 伤 0.95 秒；发电站 360 电/3 秒；充电站耗电 18；炮塔 26 伤
+
 ## 截图
 
 ![世界](docs/preview.png)

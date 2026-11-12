@@ -74,6 +74,9 @@ func is_neutral(x: int) -> bool:
 
 ## 地表高度（方块坐标，返回该列最高实心方块所在 y）
 func height_at(x: int, z: int) -> int:
+	# 左右半场镜像：保证蓝红两边的地形完全对称（PvP 公平）
+	if x > MAP_WIDTH / 2 - 1:
+		x = MAP_WIDTH - 1 - x
 	var key := Vector2i(x, z)
 	var cached = _height_cache.get(key, null)
 	if cached != null:
@@ -91,6 +94,13 @@ func base_block(x: int, y: int, z: int) -> int:
 	return block_at_height(x, y, z, height_at(x, z))
 
 
+## 镜像后用于矿脉哈希的坐标（左右半场矿脉分布也对称）
+func _mirror_x(x: int) -> int:
+	if x > MAP_WIDTH / 2 - 1:
+		return MAP_WIDTH - 1 - x
+	return x
+
+
 ## 已算出该列高度 h 时的方块（避免重复查高度缓存）
 func block_at_height(x: int, y: int, z: int, h: int) -> int:
 	if y > h:
@@ -103,7 +113,7 @@ func block_at_height(x: int, y: int, z: int, h: int) -> int:
 		return id_dirt
 	if y == h - 4 and h <= 20:
 		return id_sand
-	var roll := _hash01(x, y, z)
+	var roll := _hash01(_mirror_x(x), y, z)
 	if roll < 0.060:
 		return id_coal
 	if y <= h - 6 and roll < 0.100:

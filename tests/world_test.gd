@@ -75,5 +75,20 @@ func _initialize() -> void:
 	big.set_block(Vector3i(50, 30, 5), BlockDB.AIR)
 	_record("远离边界不重铺", not big._line_dirty[0])
 
+	# 左右半场镜像：地形与矿脉都对称（PvP 公平性）
+	var symmetric := true
+	for sx in [10, 37, 63, 90]:
+		for sz in [12, 64, 128, 200, 240]:
+			if big.terrain.height_at(sx, sz) != big.terrain.height_at(255 - sx, sz):
+				symmetric = false
+	_record("左右半场地形镜像对称", symmetric)
+
+	var ore_symmetric := true
+	for sy in [10, 14, 18]:
+		for sz in [40, 128, 210]:
+			if big.terrain.block_at_height(20, sy, sz, big.terrain.height_at(20, sz)) != big.terrain.block_at_height(235, sy, sz, big.terrain.height_at(235, sz)):
+				ore_symmetric = false
+	_record("左右半场矿脉对称", ore_symmetric)
+
 	print("通过 %d 项，失败 %d 项" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)
