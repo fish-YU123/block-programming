@@ -66,10 +66,14 @@ func _report() -> void:
 			var u: RigidBody3D = entry["unit"]
 			if not u.alive:
 				continue
-			brief.append("%s%d(%.0f,%.0f,%.0f hp%.0f e%.0f pc%.1f)" % [
+			var ctl: Dictionary = u.controls
+			brief.append("%s%d(%.0f,%.0f,%.0f hp%.0f e%.0f L%.2f Pi%.2f vm%s gh%s)" % [
 				"B" if int(u.team) == 0 else "R", int(entry["uid"]),
 				u.global_position.x, u.global_position.y, u.global_position.z, u.hp, u.energy_j / 1000.0,
-				float(entry["controller"].peace_left)])
+				float(ctl.get("lift", 0.0)), float(ctl.get("pitch", 0.0)),
+				str(ctl.get("vel_mode")), str(u.has_goal)])
+			var ctrl2 = entry["controller"]
+			brief.append("[fin=%s err=%s budget=%.2f]" % [str(ctrl2._vm.finished), str(ctrl2._vm.error), float(ctrl2._budget)])
 			if entry["controller"].halted():
 				brief.append("[halted:%s]" % str(entry["controller"].last_error()))
 		print("   单位（main.peace=%.2f）：" % _main.peace_left, " ".join(brief))
