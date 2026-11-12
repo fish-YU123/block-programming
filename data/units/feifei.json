@@ -7,7 +7,7 @@
     "coal": 8
   },
   "size": 0.75,
-  "hp": 240.0,
+  "hp": 800.0,
   "mass": 12.0,
   "energy_j": 1200000.0,
   "hover_thrust_n": 520.0,
@@ -26,14 +26,14 @@
   "laser": {
     "reach": 8.0,
     "dps_block": 80.0,
-    "dps_unit": 20.0,
+    "dps_unit": 12.0,
     "power_w": 700.0
   },
   "gun": {
     "reach": 15.0,
     "cooldown": 0.95,
     "damage_block": 60.0,
-    "damage_unit": 38.0,
+    "damage_unit": 24.0,
     "energy_j": 1500.0
   }
 }

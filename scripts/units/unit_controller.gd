@@ -276,6 +276,7 @@ func _inject_sensors(refresh_lists: bool) -> void:
 		"below": _list_snapshot.get("below", {}),
 		"moving": unit.moving,
 		"peace": peace_left,
+		"uid": int(unit.get("uid")) if unit != null else 0,
 		"t": _elapsed,
 		"res": resources,
 		"leader": 1 if is_leader else 0,

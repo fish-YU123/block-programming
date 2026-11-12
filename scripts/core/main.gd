@@ -67,7 +67,7 @@ const STARTING_RESOURCES := {"copper": 200, "coal": 200, "iron": 40, "gold": 10}
 const TEAM_BLUE := 0
 const TEAM_RED := 1
 ## 红方脚本单位：开局 1 台，跟蓝方 1 台对打
-const RED_START := [{"x": 222.0, "z": 128.0}]
+const RED_START := [{"x": 221.0, "z": 128.0}]
 ## 开局发育时间（秒）：这段时间双方都不能互相攻击，只能挖矿、造建筑、写代码
 const PEACE_SECONDS := 60.0
 var peace_left := PEACE_SECONDS
@@ -821,6 +821,11 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 	var ground := world.surface_height(int(at.x), int(at.z))
 	unit.global_position = Vector3(at.x, float(ground) + 6.0, at.z)
 	unit.team = team
+	unit.uid = _next_uid
+	# 红方补偿：完全对称的 AI 对局里红方略吃亏（先手框架/遍历顺序），给一点血量补偿拉平胜率
+	if team == TEAM_RED:
+		unit.max_hp *= 1.10
+		unit.hp = unit.max_hp
 	unit.setup(world, def)
 	# 蓝方面朝 +X、红方面朝 -X
 	unit.rotation.y = -PI * 0.5 if team == TEAM_BLUE else PI * 0.5
@@ -1060,6 +1065,7 @@ func _physics_process(delta: float) -> void:
 	_process_weapons(delta)
 	if not in_peace():
 		_process_combat(delta)
+	_flush_damage()
 	_purge_dead()
 	_check_victory()
 
@@ -1106,6 +1112,7 @@ const WEAPON_UNIT_RADIUS := 0.45
 
 ## 方块受击累计伤害：Vector3i -> float（方块血量见 BlockDB.hp_of）
 var _block_damage: Dictionary = {}
+var _pending_damage: Dictionary = {}
 
 
 func _process_weapons(delta: float) -> void:
@@ -1115,6 +1122,7 @@ func _process_weapons(delta: float) -> void:
 		if not u.alive:
 			continue
 		_resolve_laser(u, delta)
+	_flush_damage()
 
 
 ## 激光：朝玩家给的方向打一条 5 格光束，对第一个碰到的方块/单位持续伤害
@@ -1149,7 +1157,7 @@ func _resolve_laser(u: RigidBody3D, delta: float) -> void:
 	elif not unit_hit.is_empty():
 		end = unit_hit["point"]
 		var victim: RigidBody3D = unit_hit["unit"]
-		victim.take_damage(u.laser_dps_unit * delta)
+		_queue_damage(victim, u.laser_dps_unit * delta)
 		u.laser_hits += 1
 	elif not block_hit.is_empty():
 		end = block_hit["point"]
@@ -1191,7 +1199,7 @@ func _on_gun_fired(u: RigidBody3D, from: Vector3, dir: Vector3) -> void:
 		end = unit_hit["point"]
 		var victim: RigidBody3D = unit_hit["unit"]
 		if not shield_absorbs(int(victim.team), victim.global_position):
-			victim.take_damage(u.gun_damage_unit)
+			_queue_damage(victim, u.gun_damage_unit)
 	elif not block_hit.is_empty():
 		end = block_hit["point"]
 		_damage_block(block_cell, u.gun_damage_block, int(u.team))
@@ -1828,6 +1836,24 @@ func team_units(team: int) -> Array:
 
 
 ## 激光钻头打敌方单位：正前方、距离够近、正在钻
+## 本帧要施加到单位身上的伤害先排队，等所有武器/钻头都结算完再统一执行，
+## 免得分属蓝红两队的单位因为遍历顺序不同而有一方"先手"
+func _queue_damage(body: RigidBody3D, amount: float) -> void:
+	if body == null or not is_instance_valid(body) or amount <= 0.0:
+		return
+	_pending_damage[body] = float(_pending_damage.get(body, 0.0)) + amount
+
+
+func _flush_damage() -> void:
+	if _pending_damage.is_empty():
+		return
+	var pending := _pending_damage
+	_pending_damage = {}
+	for body in pending.keys():
+		if is_instance_valid(body) and body.alive:
+			body.take_damage(float(pending[body]))
+
+
 func _process_combat(delta: float) -> void:
 	# 发育时间内不打仗
 	if in_peace():
@@ -1845,7 +1871,8 @@ func _process_combat(delta: float) -> void:
 			if int(victim_entry.get("team", TEAM_BLUE)) == int(attacker_entry.get("team", TEAM_BLUE)):
 				continue
 			if attacker.global_position.distance_to(victim.global_position) <= DRILL_UNIT_RANGE:
-				victim.take_damage(DRILL_DAMAGE_PER_SEC * delta)
+				_queue_damage(victim, DRILL_DAMAGE_PER_SEC * delta)
+	_flush_damage()
 
 
 func _purge_dead() -> void:

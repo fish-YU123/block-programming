@@ -3,6 +3,7 @@ extends SceneTree
 ## 用法：--script res://tests/sim_battle.gd -- --world-seed=1 [--skip-peace] [--max=<秒>]
 
 var _main: Node
+var _alive_uids: Dictionary = {}
 var _frames := 0
 var _next_report := 0
 var _max_frames := 7200
@@ -22,6 +23,7 @@ func _initialize() -> void:
 
 
 func _process(_delta: float) -> bool:
+	_track_deaths()
 	_frames += 1
 	if _frames == 2:
 		_main.world.build_all()
@@ -45,6 +47,36 @@ func _process(_delta: float) -> bool:
 		quit(2)
 		return false
 	return false
+
+
+func _track_deaths() -> void:
+	if _main == null or _main.units == null:
+		return
+	var now: Dictionary = {}
+	for entry in _main.units:
+		var u = entry["unit"]
+		if u.alive:
+			now[int(entry["uid"])] = int(entry.get("team", -1))
+	var changed := false
+	for uid in _alive_uids.keys():
+		if not now.has(uid):
+			print("   死亡 %s%d @ %.1fs" % ["蓝" if int(_alive_uids[uid]) == 0 else "红", int(uid), float(_main._physics_frames) / 60.0])
+			changed = true
+	_alive_uids = now
+	if changed:
+		pass
+
+
+func _report_deaths() -> void:
+	var now: Dictionary = {}
+	for entry in _main.units:
+		var u = entry["unit"]
+		if u.alive:
+			now[int(entry["uid"])] = true
+	for uid in _alive_uids.keys():
+		if not now.has(uid):
+			print("   死亡 %s%d @ %.1fs" % ["B" if int(uid) % 2 == 1 else "?", int(uid), float(_main._physics_frames) / 60.0])
+	_alive_uids = now
 
 
 func _report() -> void:

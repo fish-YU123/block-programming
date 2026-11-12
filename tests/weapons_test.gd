@@ -70,6 +70,7 @@ func _check() -> void:
 	var from: Vector3 = attacker.global_position
 	var dir := Vector3(1.0, 0.0, 0.0)
 	_main._on_gun_fired(attacker, from, dir)
+	_main._flush_damage()   # 伤害是排队结算的，手动调要自己 flush
 	_record("炮管能打到正前方单位", victim.hp < victim.max_hp, "%.1f → %.1f" % [victim.max_hp, victim.hp])
 
 	# 炮管打方块：血量累计到打掉

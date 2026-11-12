@@ -27,6 +27,7 @@ var radar_radius := 2
 var radar_unit_range := 8.0
 
 var team := 0
+var uid := 0
 var max_hp := 320.0
 var hp := 320.0
 var alive := true

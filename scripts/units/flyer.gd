@@ -34,6 +34,7 @@ const PATH_REACH := 1.0
 var radar_radius := 2
 ## 队伍（0=蓝方玩家，1=红方）
 var team := 0
+var uid := 0
 var max_hp := 120.0
 var hp := 120.0
 var alive := true
