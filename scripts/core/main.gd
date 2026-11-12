@@ -70,6 +70,7 @@ const TEAM_RED := 1
 const RED_START := [{"x": 221.0, "z": 128.0}]
 ## 开局发育时间（秒）：这段时间双方都不能互相攻击，只能挖矿、造建筑、写代码
 const PEACE_SECONDS := 60.0
+const SUDDEN_DEATH_SECONDS := 210.0
 var peace_left := PEACE_SECONDS
 ## 激光钻头打单位：每秒伤害 / 有效距离
 ## 鼠标射线能够多远
@@ -1841,7 +1842,16 @@ func team_units(team: int) -> Array:
 func _queue_damage(body: RigidBody3D, amount: float) -> void:
 	if body == null or not is_instance_valid(body) or amount <= 0.0:
 		return
+	amount *= _damage_scale()
 	_pending_damage[body] = float(_pending_damage.get(body, 0.0)) + amount
+
+
+## 决胜时刻：开打 3 分半还没分出胜负，就逐步放大伤害，保证对局一定会结束
+func _damage_scale() -> float:
+	var war_time := (float(_physics_frames) / 60.0) - PEACE_SECONDS
+	if war_time < SUDDEN_DEATH_SECONDS:
+		return 1.0
+	return 1.0 + (war_time - SUDDEN_DEATH_SECONDS) / 45.0
 
 
 func _flush_damage() -> void:
