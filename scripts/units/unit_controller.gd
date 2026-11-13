@@ -44,6 +44,11 @@ var sudden := false
 ## 是不是队伍里的"指挥官"（只有它会主动盖建筑，避免每个单位都乱花资源）
 var is_leader := false
 
+## 本地 Python 模式（朋友局）：main 注入 py_tick，槽位由 main 分配
+var py_tick: Callable = Callable()
+var py_slot := -1
+var _py_list_timer := 0.0
+
 var _vm: PyVM
 ## 一"段"代码执行期间的列表类传感器快照（敌方/标记/雷达），
 ## 避免 60 行/秒的慢速执行里出现"上一行还在、下一行就空了"的竞态。
@@ -150,7 +155,12 @@ static var prof_rest_us := 0
 var _plain_wait := 0.0
 
 func tick(delta: float) -> void:
-	if unit == null or _vm == null:
+	if unit == null:
+		return
+	if py_slot >= 0 and py_tick.is_valid():
+		_tick_python(delta)
+		return
+	if _vm == null:
 		return
 	if _halted:
 		_apply_idle_controls()
@@ -190,7 +200,15 @@ func tick(delta: float) -> void:
 		_apply_idle_controls()
 		unit.runtime_error = _last_error
 		return
-	var controls: Dictionary = _vm.state.get("controls", {})
+	_apply_controls(_vm.state.get("controls", {}))
+	if profile_enabled:
+		prof_rest_us += Time.get_ticks_usec() - _t_rest
+	unit.runtime_error = ""
+	unit.runtime_logs = logs
+
+
+## 把一份控制量写进单位（VM 与 Python 共用）
+func _apply_controls(controls: Dictionary) -> void:
 	unit.controls = {
 		"lift": float(controls.get("lift", 0.0)),
 		"pitch": float(controls.get("pitch", 0.0)),
@@ -223,8 +241,34 @@ func tick(delta: float) -> void:
 		))
 	elif unit.has_goal:
 		unit.clear_go()
-	if profile_enabled:
-		prof_rest_us += Time.get_ticks_usec() - _t_rest
+
+
+## 本地 Python 模式：整段 loop() 交给玩家自己的 python 跑，控制量直接拷回来
+func _tick_python(delta: float) -> void:
+	if _halted:
+		_apply_idle_controls()
+		unit.runtime_error = _last_error
+		return
+	_elapsed += delta
+	# 感知列表（雷达 5×5×5 等）每 0.2 秒刷新一次就够，避免每帧拼字符串
+	_py_list_timer += delta
+	var refresh := _py_list_timer >= 0.2 or _list_snapshot.is_empty()
+	if refresh:
+		_py_list_timer = 0.0
+	var reply: Dictionary = py_tick.call(py_slot, _sensor_payload(refresh), delta)
+	if not bool(reply.get("ok", false)):
+		_halted = true
+		_last_error = str(reply.get("error", "运行时错误"))
+		_apply_idle_controls()
+		unit.runtime_error = _last_error
+		return
+	var new_logs: Array = reply.get("logs", [])
+	if not new_logs.is_empty():
+		logs.append_array(new_logs)
+		while logs.size() > MAX_LOGS:
+			logs.pop_front()
+	var controls: Dictionary = reply.get("controls", {})
+	_apply_controls(controls)
 	unit.runtime_error = ""
 	unit.runtime_logs = logs
 
@@ -320,6 +364,11 @@ func _marks_near(pos: Vector3) -> Array:
 
 
 func _inject_sensors(refresh_lists: bool) -> void:
+	_vm.inject(_sensor_payload(refresh_lists))
+
+
+## 收集本帧的传感器读数（VM 与本地 Python 模式共用）
+func _sensor_payload(refresh_lists: bool) -> Dictionary:
 	var s: Dictionary = unit.sense()
 	# peace / res / leader 这类高频、便宜的量始终刷新；只有感知列表缓存到段边界
 	if refresh_lists or _list_snapshot.is_empty():
@@ -342,7 +391,7 @@ func _inject_sensors(refresh_lists: bool) -> void:
 			"ore": _nearest_ore(blocks3, s["cell"]),
 			"below": _first_solid_below(unit, s["pos"]),
 		}
-	_vm.inject({
+	return {
 		"pos": s["pos"],
 		"vel": s["vel"],
 		"cell": s["cell"],
@@ -376,4 +425,4 @@ func _inject_sensors(refresh_lists: bool) -> void:
 		"res": resources,
 		"sudden": 1 if sudden else 0,
 		"leader": 1 if is_leader else 0,
-	})
+	}
