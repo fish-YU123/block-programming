@@ -75,7 +75,7 @@ var peace_left := PEACE_SECONDS
 ## 激光钻头打单位：每秒伤害 / 有效距离
 ## 鼠标射线能够多远
 const AIM_RANGE := 40.0
-const DRILL_DAMAGE_PER_SEC := 45.0
+const DRILL_DAMAGE_PER_SEC := 30.0
 const DRILL_UNIT_RANGE := 3.2
 ## 每项：{uid, unit, controller, code, revision, team, cost}
 var units: Array = []
@@ -548,6 +548,22 @@ func conveyor_boost(node) -> float:
 
 
 ## 队伍里有没有通电的雷达站（有就共享视野）
+## 某队伍已经建好的某类建筑数量（AI 用来判断"有没有维修厂/充电站"）
+func facility_count(team: int, kind: String) -> int:
+	var n := 0
+	for entry in buildings:
+		var node = entry.get("node")
+		if node == null or not is_instance_valid(node) or not node.alive:
+			continue
+		if int(node.team) != team:
+			continue
+		if node.is_under_construction() or node.is_stalled():
+			continue
+		if str(entry.get("id", "")) == kind:
+			n += 1
+	return n
+
+
 func team_has_radar(team: int) -> bool:
 	for entry in buildings:
 		var node = entry["node"]
@@ -1057,6 +1073,8 @@ func _physics_process(delta: float) -> void:
 			controller.set_peace(peace_left)
 			var team_res: Dictionary = _economy_for(int(entry.get("team", TEAM_BLUE))).all()
 			team_res["power"] = int(power_of(int(entry.get("team", TEAM_BLUE))))
+			team_res["repair"] = facility_count(int(entry.get("team", TEAM_BLUE)), "repairbay")
+			team_res["charger"] = facility_count(int(entry.get("team", TEAM_BLUE)), "charger")
 			controller.set_resources(team_res)
 		controller.tick(delta)
 	# 武器：发育时间里也能挖方块（只对单位断伤）；贴身钻头战斗只在开打后结算

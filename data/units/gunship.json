@@ -7,7 +7,7 @@
     "steel": 12
   },
   "size": 1.5,
-  "hp": 1200.0,
+  "hp": 1500.0,
   "mass": 40.0,
   "energy_j": 900000.0,
   "hover_thrust_n": 1500.0,

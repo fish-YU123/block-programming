@@ -17,6 +17,7 @@ def start():
     mem["方向"] = 1
     mem["家x"] = pos.x
     mem["上次见敌"] = 0.0
+    mem["养伤"] = 0
     mem["家z"] = pos.z
 
 def loop():
@@ -74,14 +75,25 @@ def 建设():
                 mem["等"] = t + 11.0
                 print("组装厂一号就位")
     elif mem["已建"] == 3:
-        if res["copper"] >= 25 and res["coal"] >= 15:
+        # 维修厂放在很前面：残血部队能真的回家修，对局才会拉锯起来
+        if res["copper"] >= 28 and res["iron"] >= 10:
+            if build_here("repairbay") == "":
+                mem["已建"] = 4
+                mem["等"] = t + 11.0
+                print("维修厂就位")
+        elif res["copper"] >= 25 and res["coal"] >= 15:
             if build_here("battery") == "":
                 mem["已建"] = 4
                 mem["等"] = t + 11.0
                 print("储能站就位")
     elif mem["已建"] == 4:
-        # 先补充电站，让部队打久了能回来补电
-        if res["copper"] >= 30 and res["iron"] >= 10:
+        # 再补储能站/充电站，让部队打久了能回来补电
+        if res["copper"] >= 25 and res["coal"] >= 15:
+            if build_here("battery") == "":
+                mem["已建"] = 5
+                mem["等"] = t + 11.0
+                print("储能站就位")
+        elif res["copper"] >= 30 and res["iron"] >= 10:
             if build_here("charger") == "":
                 mem["已建"] = 5
                 mem["等"] = t + 11.0
@@ -121,6 +133,17 @@ def 建设():
 
 def 进攻():
     地面 = heights[2][2]
+    # 残血且家里有维修厂、也有电，才回去修；没有维修厂就继续打（回家干等只会僵住）
+    if hp_ratio < 0.35 and res["repair"] > 0:
+        mem["养伤"] = 1
+    if mem["养伤"] == 1:
+        if hp_ratio > 0.85 and abs(pos.x - mem["家x"]) < 16.0:
+            mem["养伤"] = 0
+        else:
+            到(mem["家x"], mem["家z"], 22.0, 地面 + 6.0)
+            drill(False)
+            laser_off()
+            return
     # 电量低了先回基地充电站附近补电（不然飞到一半没电会掉地上等死）
     if energy_ratio < 0.35:
         drill(False)
