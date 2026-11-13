@@ -18,6 +18,8 @@ var max_hp := 300.0    ## 建筑血量（来自 data/buildings/*.json 的 hp）
 var hp := 300.0
 var alive := true
 var scan_cursor := 0   ## 采矿机扫矿的游标（一轮矿区扫描进度）
+## 这座厂当前在生产哪种单位（可以在 options 里切换）
+var produce_id := ""
 var build_total := 10.0  ## 建造需要多少秒
 var build_left := 0.0    ## 还剩多少秒建完（>0 表示还在施工）
 
@@ -49,6 +51,7 @@ func setup(world_ref, definition: Dictionary, at_cell: Vector3i, team_id: int) -
 	kind = str(definition.get("kind", ""))
 	base_cell = at_cell
 	team = team_id
+	produce_id = str(definition.get("unit", ""))
 	var raw: Array = definition.get("size", [3, 2, 3])
 	size = Vector3i(int(raw[0]), int(raw[1]), int(raw[2]))
 	period = maxf(float(definition.get("period", 1.0)), 0.01)
@@ -667,6 +670,36 @@ func face_target(point: Vector3) -> void:
 		return
 	var local: Vector3 = to_local(point)
 	_crane.rotation.y = atan2(-local.x, -local.z)
+
+
+## 这座厂能生产哪些单位
+func production_options() -> Array:
+	return def.get("options", []) if def.has("options") else ([str(def.get("unit", ""))] if def.has("unit") else [])
+
+
+## 切换生产目标（step = +1 下一个 / -1 上一个），返回切换后的单位 id
+func cycle_production(step: int = 1) -> String:
+	var opts: Array = production_options()
+	if opts.is_empty():
+		return ""
+	var idx := opts.find(produce_id)
+	if idx < 0:
+		idx = 0
+	else:
+		idx = posmod(idx + step, opts.size())
+	produce_id = str(opts[idx])
+	return produce_id
+
+
+## 指定生产目标（不在选项里就返回错误字符串）
+func set_production(unit_id: String) -> String:
+	var opts: Array = production_options()
+	if opts.is_empty():
+		return "这种建筑不能生产单位"
+	if not opts.has(unit_id):
+		return "这里不能生产 %s" % unit_id
+	produce_id = unit_id
+	return ""
 
 
 func center_cell() -> Vector3i:

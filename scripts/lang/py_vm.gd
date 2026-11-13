@@ -17,7 +17,7 @@ const BUILTINS := [
 	"print", "set_drive", "set_spin", "set_steer", "set_thrust", "get_link",
 	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot", "go_to", "stop", "find_path", "set_velocity", "set_altitude",
 	"build", "build_here", "place", "transfer",
-	"team_set", "team_get", "mark", "command",
+	"team_set", "team_get", "mark", "command", "produce",
 	"range", "len", "abs", "min", "max", "int", "float", "str", "round", "bool",
 ]
 
@@ -44,6 +44,8 @@ var team_get_provider: Callable = Callable()
 var mark_provider: Callable = Callable()
 ## 跨单位直接下指令：command(uid, 动作, x, y, z)
 var command_provider: Callable = Callable()
+## 让旁边的厂房改生产：produce(单位id)
+var produce_provider: Callable = Callable()
 var logs: Array = []
 var error := ""
 var finished := false
@@ -997,6 +999,14 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 				on = float(flag) != 0.0
 			state["controls"]["transfer"] = on
 			stack.append(null)
+			return true
+		"produce":
+			if args.size() != 1 or not _is_str(args[0]):
+				return _fail("TypeError", "produce(单位id)：让附近自己的厂房改生产这种单位", op, ins)
+			var produce_err := ""
+			if produce_provider.is_valid():
+				produce_err = str(produce_provider.call(str(args[0])))
+			stack.append(produce_err)
 			return true
 		"command":
 			if args.size() < 2 or not _is_num(args[0]) or not _is_str(args[1]):

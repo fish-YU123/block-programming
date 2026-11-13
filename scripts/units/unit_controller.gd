@@ -33,6 +33,8 @@ var team_set_provider: Callable = Callable()
 var team_get_provider: Callable = Callable()
 var mark_provider: Callable = Callable()
 var command_provider: Callable = Callable()
+## 让旁边的厂房改生产某种单位：produce(单位id)
+var produce_provider: Callable = Callable()
 ## 开局发育时间剩余秒数（>0 时双方不能攻击）
 var peace_left := 0.0
 ## 全队资源（字典，由 main 每帧喂进来）
@@ -258,6 +260,10 @@ func _wire_path_provider() -> void:
 	_vm.mark_provider = func(x: float, y: float, z: float, tag: String) -> void:
 		if mark_provider.is_valid():
 			mark_provider.call(x, y, z, tag)
+	_vm.produce_provider = func(unit_id: String) -> String:
+		if produce_provider.is_valid():
+			return str(produce_provider.call(unit_id))
+		return "没有生产接口"
 	_vm.command_provider = func(target_uid: int, action: String, x: float, y: float, z: float) -> String:
 		if command_provider.is_valid():
 			return str(command_provider.call(target_uid, action, x, y, z))

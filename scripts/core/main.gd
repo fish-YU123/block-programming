@@ -862,6 +862,8 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 		return build_near(def_id, unit.global_position, team)
 	controller.place_provider = func(kind: String, cell: Vector3i) -> String:
 		return place_block_for(unit, kind, cell)
+	controller.produce_provider = func(unit_id: String) -> String:
+		return switch_production_near(unit_id, unit.global_position, team)
 	# 协同原语：队伍共享黑板 + 标点
 	controller.team_set_provider = func(key: String, value) -> void:
 		_board_for(team)[key] = value
@@ -1913,7 +1915,8 @@ func _charge_nearby(node, def: Dictionary, period: float) -> void:
 
 func _produce_unit(node) -> void:
 	var def: Dictionary = building_db.get_def(str(node.def.get("id", "")))
-	var unit_id := str(def.get("unit", "feifei"))
+	# 优先用这座厂当前选中的生产目标（玩家/代码可以切换）
+	var unit_id := str(node.produce_id) if node.produce_id != "" else str(def.get("unit", "feifei"))
 	var unit_def: Dictionary = unit_db.get_def(unit_id)
 	if unit_def.is_empty():
 		return
@@ -1925,9 +1928,10 @@ func _produce_unit(node) -> void:
 		return
 	team_economy.spend(cost)
 	var point: Vector3 = node.spawn_point()
-	_spawn_unit(unit_def, point, _preset_code_for(int(node.team)), int(node.team))
+	# 新下线的单位用它自己的预设代码（炮艇跑炮艇的 AI、侦察机跑侦察机的）
+	_spawn_unit(unit_def, point, _preset_for_unit(unit_def), int(node.team))
 	node.produced += 1
-	hud.show_message("组装厂下线一台 %s" % str(unit_def.get("display_name", unit_id)))
+	hud.show_message("%s下线一台 %s" % [str(def.get("display_name", "工厂")), str(unit_def.get("display_name", unit_id))])
 
 
 ## 各队伍的预设代码：蓝方是"指挥官"AI（造建筑 + 滚雪球），红方是简单的战斗 AI
@@ -2186,6 +2190,44 @@ func _update_loading_hint() -> void:
 	_world_ready_shown = true
 
 
+## 对准一座厂房按 P：在它可生产的单位之间循环切换
+func _cycle_building_production() -> void:
+	var hit: Dictionary = _aim()
+	if hit.is_empty():
+		hud.show_message("先把准星对准一座厂房")
+		return
+	var cell: Vector3i = hit["cell"]
+	for entry in buildings:
+		var node = entry["node"]
+		if not node.occupies(cell):
+			continue
+		if node.production_options().is_empty():
+			hud.show_message("%s 不能生产单位" % str(node.def.get("display_name", "这座建筑")))
+			return
+		var next_id: String = node.cycle_production(1)
+		var unit_def: Dictionary = unit_db.get_def(next_id) if unit_db != null and unit_db.has(next_id) else {}
+		hud.show_message("%s 改为生产：%s" % [str(node.def.get("display_name", "工厂")), str(unit_def.get("display_name", next_id))])
+		return
+	hud.show_message("准星没对着建筑")
+
+
+## 给单位代码用：把 12 格内最近的一座厂房改成生产 unit_id
+func switch_production_near(kind: String, near: Vector3, team: int) -> String:
+	var best = null
+	var best_dist := 1e9
+	for entry in buildings:
+		var node = entry["node"]
+		if int(node.team) != team or node.production_options().is_empty():
+			continue
+		var d: float = node.center_world().distance_to(near)
+		if d < best_dist:
+			best_dist = d
+			best = node
+	if best == null or best_dist > 12.0:
+		return "附近没有能生产单位、并且属于你的厂房"
+	return str(best.set_production(kind))
+
+
 ## 队伍面板：每台我方单位一行（血量/电量/状态）
 func _update_squad_panel() -> void:
 	if hud == null or not hud.squad_visible():
@@ -2359,6 +2401,9 @@ func _input(event: InputEvent) -> void:
 		return
 	if event.keycode == KEY_C:
 		_toggle_code_panel()
+		return
+	if event.keycode == KEY_P:
+		_cycle_building_production()
 		return
 	if event.keycode == KEY_TAB:
 		if hud != null:
