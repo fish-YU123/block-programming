@@ -70,7 +70,7 @@ const TEAM_RED := 1
 const RED_START := [{"x": 221.0, "z": 128.0}]
 ## 开局发育时间（秒）：这段时间双方都不能互相攻击，只能挖矿、造建筑、写代码
 const PEACE_SECONDS := 60.0
-const SUDDEN_DEATH_SECONDS := 210.0
+const SUDDEN_DEATH_SECONDS := 180.0
 var peace_left := PEACE_SECONDS
 ## 激光钻头打单位：每秒伤害 / 有效距离
 ## 鼠标射线能够多远
