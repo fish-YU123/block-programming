@@ -1116,6 +1116,9 @@ func _update_code_panel() -> void:
 ## 轻量计时器：性能排查时把各系统耗时加起来打印（默认关闭，零开销）
 var profile_enabled := false
 var profile_us: Dictionary = {}
+## 单位数超过这个阈值就开始「奇偶帧轮流跑代码」
+const HALF_RATE_UNIT_THRESHOLD := 12
+var _tick_parity := 0
 
 
 func _prof(tag: String, started_us: int) -> void:
@@ -1151,7 +1154,13 @@ func _physics_process(delta: float) -> void:
 	_prof("buildings", _t0)
 	_tick_peace(delta)
 	var _t_units := Time.get_ticks_usec()
-	for entry in units:
+	# 单位很多时，代码按「奇偶帧轮流跑」：平均吞吐不变，但每帧只付一半的 VM 开销
+	var half_rate: bool = units.size() > HALF_RATE_UNIT_THRESHOLD
+	var tick_delta: float = delta * (2.0 if half_rate else 1.0)
+	for idx in units.size():
+		if half_rate and (idx % 2) != _tick_parity:
+			continue
+		var entry: Dictionary = units[idx]
 		var _t_pre := Time.get_ticks_usec()
 		var controller: UnitController = entry["controller"]
 		var self_unit: RigidBody3D = entry["unit"]
@@ -1171,8 +1180,9 @@ func _physics_process(delta: float) -> void:
 			controller.sudden = _damage_scale() > 1.001
 		_prof("unit_pre", _t_pre)
 		var _t_tick := Time.get_ticks_usec()
-		controller.tick(delta)
+		controller.tick(tick_delta)
 		_prof("unit_tick", _t_tick)
+	_tick_parity = 1 - _tick_parity
 	_prof("units", _t_units)
 	# 武器：发育时间里也能挖方块（只对单位断伤）；贴身钻头战斗只在开打后结算
 	var _t1 := Time.get_ticks_usec()

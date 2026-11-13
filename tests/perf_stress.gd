@@ -24,6 +24,7 @@ func _process(delta: float) -> bool:
 	if _frames == 2:
 		print("启动耗时: %.0f ms" % ((Time.get_ticks_usec() - _t0) / 1000.0))
 		_main.profile_enabled = true
+		load("res://scripts/units/unit_controller.gd").profile_enabled = true
 		_main.world.build_all()
 		_main._start_game()
 		_main.skip_peace()
@@ -58,6 +59,9 @@ func _process(delta: float) -> bool:
 			var avg := _accum / float(_frames - 40) * 1000.0
 			print("== 平均帧时间 %.2f ms（%.0f fps）" % [avg, 1000.0 / avg])
 			print("== 最慢帧 %.2f ms @ 第 %d 帧" % [_worst, _worst_at])
+			var ctrl = load("res://scripts/units/unit_controller.gd")
+			print("    controller: inject %.1f ms / step %.1f ms / 其余 %.1f ms" % [
+				float(ctrl.prof_inject_us) / 1000.0, float(ctrl.prof_step_us) / 1000.0, float(ctrl.prof_rest_us) / 1000.0])
 			for k in _main.profile_us.keys():
 				print("    %-12s %7.1f ms" % [str(k), float(_main.profile_us[k]) / 1000.0])
 			print("== draw calls %d / primitives %d / objects %d" % [

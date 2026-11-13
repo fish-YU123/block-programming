@@ -141,8 +141,13 @@ func last_error() -> String:
 
 
 var _elapsed := 0.0
+## 性能统计（仅 profile_enabled 时累加，单位是微秒）
+static var profile_enabled := false
+static var prof_inject_us := 0
+static var prof_step_us := 0
+static var prof_rest_us := 0
 ## 纯顶层代码的重跑间隔（秒）；正常 start/loop 程序一直是 0
-var _plain_wait := 0.0  ## 这个单位开机以来过了多少秒（给 AI 计时用）
+var _plain_wait := 0.0
 
 func tick(delta: float) -> void:
 	if unit == null or _vm == null:
@@ -152,12 +157,16 @@ func tick(delta: float) -> void:
 		unit.runtime_error = _last_error
 		return
 	_elapsed += delta
+	var _t_inject := Time.get_ticks_usec()
 	# 纯顶层代码跑完一轮后降频重跑（每 0.5 秒），否则空程序会每帧重启、每帧重建感知快照
 	if _plain_wait > 0.0:
 		_plain_wait -= delta
 		_apply_idle_controls()
 		return
 	_inject_sensors(false)
+	if profile_enabled:
+		prof_inject_us += Time.get_ticks_usec() - _t_inject
+	var _t_step := Time.get_ticks_usec()
 	_budget += delta * LINES_PER_SECOND * line_rate
 	var steps := mini(int(_budget), MAX_STEPS_PER_FRAME)
 	for i in steps:
@@ -174,6 +183,9 @@ func tick(delta: float) -> void:
 				logs.pop_front()
 		if bool(result.get("done", false)):
 			_advance()
+	if profile_enabled:
+		prof_step_us += Time.get_ticks_usec() - _t_step
+	var _t_rest := Time.get_ticks_usec()
 	if _halted:
 		_apply_idle_controls()
 		unit.runtime_error = _last_error
@@ -211,6 +223,8 @@ func tick(delta: float) -> void:
 		))
 	elif unit.has_goal:
 		unit.clear_go()
+	if profile_enabled:
+		prof_rest_us += Time.get_ticks_usec() - _t_rest
 	unit.runtime_error = ""
 	unit.runtime_logs = logs
 
