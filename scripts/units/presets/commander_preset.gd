@@ -173,6 +173,11 @@ def 进攻():
         return
     mem["上次见敌"] = t
     敌 = enemies[0]
+    # 指挥官用 command 直接调度队友：让非指挥官的兵种一起集火这个目标
+    if leader == 1:
+        for 友 in allies:
+            if 友.type != "feifei":
+                command(友.uid, "attack", 敌.x, 敌.y, 敌.z)
     # 追击时别贴地飞（贴着山会卡住），至少保持地面以上 7 米
     追击高度 = max(地面 + 7.0, 敌.y + 1.0)
     if 敌.dist > 2.5:

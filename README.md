@@ -139,7 +139,7 @@ docs/              预览图与玩家/开发文档
 
 玩家代码可用传感器：`pos` `vel` `cell` `yaw` `energy` `energy_ratio` `thrust` `drill_hits` `hp` `hp_ratio` `team` `peace` `t` `res` `leader` `blocks[5][5]` `heights[5][5]` `blocks3[5][5][5]` `here` `below` `ore` `orders` `enemies`；
 控制接口：`set_lift(0~1)` `set_tilt(前后, 左右)` `set_rcs(转向, 前后)` `set_velocity(vx, vz)` `set_altitude(y)` `drill(开关)` `laser(x,y,z)` `laser_off()` `shoot(x,y,z)` `find_path(x,y,z)` `go_to(x,y,z)` `stop()` `build(id,x,y,z)` `build_here(id)` `place(方块,x,y,z)` `transfer(开/关)`。
-完整说明见 `docs/单位编程手册.md` 与 `docs/飞飞快速上手.md`。
+完整说明见 `docs/战术范例.md`（可直接抄的兵种协同代码）与 `docs/单位编程手册.md` 与 `docs/飞飞快速上手.md`。
 
 ### 预设 AI
 
