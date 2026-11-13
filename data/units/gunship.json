@@ -22,7 +22,7 @@
   "idle_power_w": 80.0,
   "lift_power_w": 900.0,
   "rcs_power_w": 160.0,
-  "radar_unit_range": 12.0,
+  "radar_unit_range": 26.0,
   "laser": {
     "reach": 8.0,
     "dps_block": 120.0,

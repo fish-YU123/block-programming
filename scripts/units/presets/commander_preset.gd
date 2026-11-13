@@ -134,7 +134,7 @@ def 建设():
 def 进攻():
     地面 = heights[2][2]
     # 残血且家里有维修厂、也有电，才回去修；没有维修厂就继续打（回家干等只会僵住）
-    if hp_ratio < 0.35 and res["repair"] > 0:
+    if hp_ratio < 0.35 and res["repair"] > 0 and sudden == 0:
         mem["养伤"] = 1
     if mem["养伤"] == 1:
         if hp_ratio > 0.85 and abs(pos.x - mem["家x"]) < 16.0:

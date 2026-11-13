@@ -1076,6 +1076,7 @@ func _physics_process(delta: float) -> void:
 			team_res["repair"] = facility_count(int(entry.get("team", TEAM_BLUE)), "repairbay")
 			team_res["charger"] = facility_count(int(entry.get("team", TEAM_BLUE)), "charger")
 			controller.set_resources(team_res)
+			controller.sudden = _damage_scale() > 1.001
 		controller.tick(delta)
 	# 武器：发育时间里也能挖方块（只对单位断伤）；贴身钻头战斗只在开打后结算
 	_process_cargo_transfers(delta)

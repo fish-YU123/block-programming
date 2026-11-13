@@ -26,6 +26,8 @@ var place_provider: Callable = Callable()
 var peace_left := 0.0
 ## 全队资源（字典，由 main 每帧喂进来）
 var resources: Dictionary = {}
+## 决胜时刻（伤害放大）是否已生效：生效后 AI 不再撤退养伤
+var sudden := false
 ## 是不是队伍里的"指挥官"（只有它会主动盖建筑，避免每个单位都乱花资源）
 var is_leader := false
 
@@ -279,5 +281,6 @@ func _inject_sensors(refresh_lists: bool) -> void:
 		"uid": int(unit.get("uid")) if unit != null else 0,
 		"t": _elapsed,
 		"res": resources,
+		"sudden": 1 if sudden else 0,
 		"leader": 1 if is_leader else 0,
 	})

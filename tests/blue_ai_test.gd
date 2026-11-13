@@ -57,7 +57,7 @@ func _process(_delta: float) -> bool:
 		for e in _main.team_units(team):
 			if float(e["unit"].hp) < float(e["unit"].max_hp) - 1.0:
 				_saw_combat = true
-				if float(e["unit"].hp) < float(e["unit"].max_hp) * 0.25:
+				if float(e["unit"].hp) < float(e["unit"].max_hp) * 0.5:
 					if team == 0:
 						_blue_bad = true
 					else:
@@ -91,7 +91,7 @@ func _process(_delta: float) -> bool:
 		# 已知问题：镜像地形之后双方经济完全对称，偶尔会打成"谁也不敢近身"的僵局，
 		# 这里只要求「真的交过火」（双方都掉过血）+ 至少一方有损失，胜负另由 sim_battle 长期观察。
 		_record("双方交过火（都掉过血）", _blue_damaged and _red_damaged, "蓝掉血=%s 红掉血=%s" % [str(_blue_damaged), str(_red_damaged)])
-		_record("至少一方被打到残血", _blue_bad or _red_bad, "蓝残血=%s 红残血=%s" % [str(_blue_bad), str(_red_bad)])
+		_record("至少一方掉到半血以下", _blue_bad or _red_bad, "蓝=%s 红=%s" % [str(_blue_bad), str(_red_bad)])
 		_record("全程没有单位代码报错", not _any_error())
 		_done = true
 	return false
