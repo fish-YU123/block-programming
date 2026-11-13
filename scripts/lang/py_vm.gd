@@ -17,6 +17,7 @@ const BUILTINS := [
 	"print", "set_drive", "set_spin", "set_steer", "set_thrust", "get_link",
 	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot", "go_to", "stop", "find_path", "set_velocity", "set_altitude",
 	"build", "build_here", "place", "transfer",
+	"team_set", "team_get", "mark",
 	"range", "len", "abs", "min", "max", "int", "float", "str", "round", "bool",
 ]
 
@@ -37,6 +38,10 @@ var path_provider: Callable = Callable()
 var build_provider: Callable = Callable()
 var build_here_provider: Callable = Callable()
 var place_provider: Callable = Callable()
+## 协同：队伍共享黑板与标点
+var team_set_provider: Callable = Callable()
+var team_get_provider: Callable = Callable()
+var mark_provider: Callable = Callable()
 var logs: Array = []
 var error := ""
 var finished := false
@@ -989,6 +994,35 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			elif _is_num(flag):
 				on = float(flag) != 0.0
 			state["controls"]["transfer"] = on
+			stack.append(null)
+			return true
+		"team_set":
+			if args.size() != 2 or not _is_str(args[0]):
+				return _fail("TypeError", "team_set(名字, 值)：往全队共享的黑板写一个值（值只能是数字/文字/真假）", op, ins)
+			var tv = args[1]
+			if not (tv is float or tv is int or tv is String or tv is bool):
+				return _fail("TypeError", "team_set(名字, 值)：值只能是数字、文字或真/假", op, ins)
+			if team_set_provider.is_valid():
+				team_set_provider.call(str(args[0]), tv)
+			stack.append(null)
+			return true
+		"team_get":
+			if args.size() < 1 or not _is_str(args[0]):
+				return _fail("TypeError", "team_get(名字, 默认值)：读全队共享黑板上的值", op, ins)
+			var fallback = args[1] if args.size() > 1 else 0.0
+			var got = fallback
+			if team_get_provider.is_valid():
+				got = team_get_provider.call(str(args[0]), fallback)
+			stack.append(got)
+			return true
+		"mark":
+			if args.size() < 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
+				return _fail("TypeError", "mark(x, y, z, 标签)：给全队标一个点，别人在 marks 里能看到", op, ins)
+			var tag := ""
+			if args.size() > 3 and args[3] is String:
+				tag = str(args[3])
+			if mark_provider.is_valid():
+				mark_provider.call(float(args[0]), float(args[1]), float(args[2]), tag)
 			stack.append(null)
 			return true
 		"place":

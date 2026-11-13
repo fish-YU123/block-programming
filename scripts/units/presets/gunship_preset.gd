@@ -10,7 +10,18 @@ def start():
 def loop():
     地面 = heights[2][2]
     if len(enemies) == 0:
-        # 没敌情就压向地图中线
+        # 自己看不见敌人，但侦察机可能标过点：按标记去打
+        if len(marks) > 0:
+            标 = marks[0]
+            set_altitude(max(地面 + 9.0, 标.y + 6.0))
+            if 标.dist > 20.0:
+                set_velocity(max(-18, min(18, (标.x - pos.x) * 0.9)),
+                             max(-18, min(18, (标.z - pos.z) * 0.9)))
+            else:
+                set_velocity(0.0, 0.0)
+                shoot(标.x, 标.y, 标.z)
+            return
+        # 完全没情报就压向地图中线
         if pos.x < 118.0:
             set_velocity(14.0, 0.0)
         elif pos.x > 138.0:

@@ -18,7 +18,12 @@ def loop():
     if pos.x < 46.0:
         mem["方向"] = 1
     set_velocity(22.0 * mem["方向"], 4.0)
-    # 看到敌人就在附近绕，保持 25 米安全距离
+    # 看到敌人：把它的位置标给全队（队友的 marks 里会出现，炮艇就会去打）
+    if len(enemies) > 0:
+        敌 = enemies[0]
+        mark(敌.x, 敌.y, 敌.z, "敌人")
+        team_set("敌人数量", len(enemies))
+    # 保持 25 米安全距离，别贴脸
     if len(enemies) > 0:
         if enemies[0].dist < 18.0:
             set_velocity(-16.0 * mem["方向"], 0.0)

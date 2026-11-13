@@ -79,6 +79,11 @@ const DRILL_DAMAGE_PER_SEC := 30.0
 const DRILL_UNIT_RANGE := 3.2
 ## 每项：{uid, unit, controller, code, revision, team, cost}
 var units: Array = []
+## 每队一块共享黑板（玩家代码里用 team_set / team_get 读写）
+var team_boards: Dictionary = {}
+## 每队一份共享标点列表（玩家代码里用 mark 写，用 marks 读），30 秒自动过期
+var team_marks: Dictionary = {}
+const MARK_TTL := 30.0
 var _next_uid := 1
 var game_over := ""
 var _physics_frames := 0
@@ -854,6 +859,19 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 		return build_near(def_id, unit.global_position, team)
 	controller.place_provider = func(kind: String, cell: Vector3i) -> String:
 		return place_block_for(unit, kind, cell)
+	# 协同原语：队伍共享黑板 + 标点
+	controller.team_set_provider = func(key: String, value) -> void:
+		_board_for(team)[key] = value
+	controller.team_get_provider = func(key: String, fallback):
+		return _board_for(team).get(key, fallback)
+	controller.mark_provider = func(x: float, y: float, z: float, tag: String) -> void:
+		var list: Array = _marks_for(team)
+		for old in list:
+			if absf(float(old.get("x", 0.0)) - x) + absf(float(old.get("y", 0.0)) - y) + absf(float(old.get("z", 0.0)) - z) < 1.0:
+				old["t"] = 0.0
+				old["tag"] = tag
+				return
+		list.append({"x": x, "y": y, "z": z, "tag": tag, "t": 0.0})
 	unit.gun_fired.connect(_on_gun_fired)
 	unit.block_dug.connect(_on_block_dug)
 	controller.bind(unit, code, 1)
@@ -1062,6 +1080,7 @@ func _physics_process(delta: float) -> void:
 	if production != null:
 		production.tick(delta)
 	_prune_orders()
+	_prune_marks(delta)
 	_refresh_enemy_sensors()
 	_tick_buildings(delta)
 	_tick_peace(delta)
@@ -1071,6 +1090,10 @@ func _physics_process(delta: float) -> void:
 		if self_unit.alive:
 			controller.set_orders(orders_for(self_unit.global_position))
 			controller.set_peace(peace_left)
+			var my_team_id: int = int(entry.get("team", TEAM_BLUE))
+			controller.board = _board_for(my_team_id)
+			controller.marks = _marks_for(my_team_id)
+			controller.allies = _allies_for(self_unit, my_team_id)
 			var team_res: Dictionary = _economy_for(int(entry.get("team", TEAM_BLUE))).all()
 			team_res["power"] = int(power_of(int(entry.get("team", TEAM_BLUE))))
 			team_res["repair"] = facility_count(int(entry.get("team", TEAM_BLUE)), "repairbay")
@@ -1310,6 +1333,51 @@ func _refresh_jamming() -> void:
 			if (jammer["pos"] as Vector3).distance_to(unit.global_position) <= float(jammer["radius"]):
 				rate = minf(rate, float(jammer["slow"]))
 		controller.line_rate = rate
+
+
+## 每队一块共享黑板
+func _board_for(team: int) -> Dictionary:
+	if not team_boards.has(team):
+		team_boards[team] = {}
+	return team_boards[team]
+
+
+## 每队一份共享标点
+func _marks_for(team: int) -> Array:
+	if not team_marks.has(team):
+		team_marks[team] = []
+	return team_marks[team]
+
+
+## 同队友军快照（给玩家代码做编队/协同用）
+func _allies_for(self_unit: RigidBody3D, team: int) -> Array:
+	var out: Array = []
+	for other in team_units(team):
+		var o: RigidBody3D = other["unit"]
+		if o == self_unit or not o.alive:
+			continue
+		out.append({
+			"x": o.global_position.x,
+			"y": o.global_position.y,
+			"z": o.global_position.z,
+			"type": o.unit_id,
+			"hp": o.hp,
+			"dist": self_unit.global_position.distance_to(o.global_position),
+		})
+	out.sort_custom(func(a, b): return float(a["dist"]) < float(b["dist"]))
+	return out
+
+
+## 标点过期清理（30 秒）
+func _prune_marks(delta: float) -> void:
+	for team in team_marks.keys():
+		var list: Array = team_marks[team]
+		var kept: Array = []
+		for m in list:
+			m["t"] = float(m.get("t", 0.0)) + delta
+			if float(m["t"]) <= MARK_TTL:
+				kept.append(m)
+		team_marks[team] = kept
 
 
 func _refresh_enemy_sensors() -> void:

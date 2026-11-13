@@ -17,11 +17,19 @@ var logs: Array = []
 var line_rate := 1.0   ## 代码执行速度倍率（被敌方干扰塔压制时会降到 0.5）
 
 var enemies: Array = []
+## 同队友军（不含自己），由 main 每帧刷新
+var allies: Array = []
+## 全队共享黑板 / 标点：main 里每队只有一份，这里拿的是同一个引用
+var board: Dictionary = {}
+var marks: Array = []
 var orders: Array = []
 ## 建筑接口（由 main 注入）：func(id: String, cell: Vector3i) -> String / func(id: String) -> String
 var build_provider: Callable = Callable()
 var build_here_provider: Callable = Callable()
 var place_provider: Callable = Callable()
+var team_set_provider: Callable = Callable()
+var team_get_provider: Callable = Callable()
+var mark_provider: Callable = Callable()
 ## 开局发育时间剩余秒数（>0 时双方不能攻击）
 var peace_left := 0.0
 ## 全队资源（字典，由 main 每帧喂进来）
@@ -237,6 +245,41 @@ func _wire_path_provider() -> void:
 		if place_provider.is_valid():
 			return str(place_provider.call(kind, cell))
 		return "没有放置接口"
+	_vm.team_set_provider = func(key: String, value) -> void:
+		if team_set_provider.is_valid():
+			team_set_provider.call(key, value)
+	_vm.team_get_provider = func(key: String, fallback):
+		if team_get_provider.is_valid():
+			return team_get_provider.call(key, fallback)
+		return fallback
+	_vm.mark_provider = func(x: float, y: float, z: float, tag: String) -> void:
+		if mark_provider.is_valid():
+			mark_provider.call(x, y, z, tag)
+
+
+## sense() 里的 pos 是 {x,y,z} 字典，这里转成 Vector3
+func _pos_vec(p) -> Vector3:
+	if p is Vector3:
+		return p
+	if p is Dictionary:
+		return Vector3(float(p.get("x", 0.0)), float(p.get("y", 0.0)), float(p.get("z", 0.0)))
+	return Vector3.ZERO
+
+
+## 全队标点按距离排序（最近的在前），只给前 8 个
+func _marks_near(pos: Vector3) -> Array:
+	var out: Array = []
+	for m in marks:
+		if not (m is Dictionary):
+			continue
+		var item: Dictionary = (m as Dictionary).duplicate()
+		var dx: float = float(item.get("x", 0.0)) - pos.x
+		var dy: float = float(item.get("y", 0.0)) - pos.y
+		var dz: float = float(item.get("z", 0.0)) - pos.z
+		item["dist"] = sqrt(dx * dx + dy * dy + dz * dz)
+		out.append(item)
+	out.sort_custom(func(a, b): return float(a["dist"]) < float(b["dist"]))
+	return out.slice(0, 8)
 
 
 func _inject_sensors(refresh_lists: bool) -> void:
@@ -252,6 +295,9 @@ func _inject_sensors(refresh_lists: bool) -> void:
 			"here": unit.block_here(),
 			"enemies": enemies.duplicate(true),
 			"orders": orders.duplicate(true),
+			"allies": allies.duplicate(true),
+			"team_mem": board.duplicate(true),
+			"marks": _marks_near(_pos_vec(s["pos"])),
 			"ore": _nearest_ore(blocks3, s["cell"]),
 			"below": _first_solid_below(unit, s["pos"]),
 		}
@@ -274,6 +320,9 @@ func _inject_sensors(refresh_lists: bool) -> void:
 		"here": _list_snapshot["here"],
 		"enemies": _list_snapshot["enemies"],
 		"orders": _list_snapshot["orders"],
+		"allies": _list_snapshot.get("allies", []),
+		"team_mem": _list_snapshot.get("team_mem", {}),
+		"marks": _list_snapshot.get("marks", []),
 		"ore": _list_snapshot.get("ore", {}),
 		"below": _list_snapshot.get("below", {}),
 		"moving": unit.moving,
