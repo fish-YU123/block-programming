@@ -65,6 +65,7 @@ func bind(unit_node: Node3D, code: String, code_revision: int) -> void:
 	_vm = PyVM.new()
 	_wire_path_provider()
 	_list_snapshot = {}
+	_plain_wait = 0.0
 	_vm.load_source(source)
 	if _vm.finished and _vm.error != "":
 		_halted = true
@@ -139,7 +140,9 @@ func last_error() -> String:
 	return _last_error
 
 
-var _elapsed := 0.0  ## 这个单位开机以来过了多少秒（给 AI 计时用）
+var _elapsed := 0.0
+## 纯顶层代码的重跑间隔（秒）；正常 start/loop 程序一直是 0
+var _plain_wait := 0.0  ## 这个单位开机以来过了多少秒（给 AI 计时用）
 
 func tick(delta: float) -> void:
 	if unit == null or _vm == null:
@@ -149,6 +152,11 @@ func tick(delta: float) -> void:
 		unit.runtime_error = _last_error
 		return
 	_elapsed += delta
+	# 纯顶层代码跑完一轮后降频重跑（每 0.5 秒），否则空程序会每帧重启、每帧重建感知快照
+	if _plain_wait > 0.0:
+		_plain_wait -= delta
+		_apply_idle_controls()
+		return
 	_inject_sensors(false)
 	_budget += delta * LINES_PER_SECOND * line_rate
 	var steps := mini(int(_budget), MAX_STEPS_PER_FRAME)
@@ -222,7 +230,9 @@ func _advance() -> void:
 	if _vm.has_function("loop"):
 		if _vm.call_function("loop"):
 			return
+	# 既没有 start 也没有 loop：纯顶层代码。重启后降频，避免每帧重复执行 + 重复刷新感知列表
 	_vm.restart()
+	_plain_wait = 0.5
 
 
 func _apply_idle_controls() -> void:
@@ -297,9 +307,10 @@ func _marks_near(pos: Vector3) -> Array:
 
 func _inject_sensors(refresh_lists: bool) -> void:
 	var s: Dictionary = unit.sense()
-	var radar: Dictionary = unit.radar()
 	# peace / res / leader 这类高频、便宜的量始终刷新；只有感知列表缓存到段边界
 	if refresh_lists or _list_snapshot.is_empty():
+		# radar 会拼 5×5×5 的方块名数组（比较贵），只有真的要刷新列表时才取
+		var radar: Dictionary = unit.radar()
 		var blocks3: Array = radar.get("blocks3", [])
 		_list_snapshot = {
 			"blocks": radar["blocks"],

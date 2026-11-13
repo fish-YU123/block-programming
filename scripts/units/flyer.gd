@@ -335,7 +335,12 @@ func _update_badge() -> void:
 	if _badge == null:
 		return
 	var no_power: bool = alive and (energy_out or energy_j <= energy_max * 0.08)
-	StatusBadges.set_kind(_badge, StatusBadges.Kind.NO_POWER if no_power else StatusBadges.Kind.NONE)
+	var kind: int = StatusBadges.Kind.NO_POWER if no_power else StatusBadges.Kind.NONE
+	StatusBadges.set_kind(_badge, kind)
+	# 远离相机就隐藏图标，省 draw call
+	if kind != StatusBadges.Kind.NONE:
+		var cam: Camera3D = get_viewport().get_camera_3d()
+		_badge.visible = cam != null and cam.global_position.distance_to(global_position) < 70.0
 	if no_power:
 		var bob := sin(_anim_time * 3.0) * 0.05
 		_badge.position = Vector3(0.0, unit_size + 0.45 + bob, 0.0)

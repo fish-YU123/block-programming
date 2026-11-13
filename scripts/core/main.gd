@@ -95,6 +95,9 @@ var units_root: Node3D
 var buildings_root: Node3D
 var _fx_root: Node3D
 var _fx: Array = []
+## 火花总数上限：火花是独立 MeshInstance，太多会顶爆 draw call
+const MAX_FX := 160
+var _spark_mesh: BoxMesh = null
 ## 预设单位 + 玩家代码（现在还没有编辑器，先用默认代码）
 const MAX_UNITS := 20
 const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.COMMANDER_SOURCE}]
@@ -232,6 +235,7 @@ func _ready() -> void:
 	_highlight.material_override = _highlight_material
 	add_child(_highlight)
 	_refresh_hud()
+	_prewarm_visuals()
 	hud.set_loading_mode(true)
 
 
@@ -254,7 +258,7 @@ var command_lost: Array = [false, false]   ## 每队指挥中心有没有被拆�
 
 func _remove_building(node: Node3D) -> void:
 	if node != null and is_instance_valid(node):
-		_spawn_sparks(node.global_position + Vector3(0.0, 1.0, 0.0), Color(1.0, 0.55, 0.25), 14, 8.0)
+		_spawn_sparks(node.global_position + Vector3(0.0, 1.0, 0.0), Color(1.0, 0.55, 0.25), 10, 8.0)
 		if rig != null:
 			rig.shake(0.12)
 	for i in range(buildings.size() - 1, -1, -1):
@@ -1109,7 +1113,19 @@ func _update_code_panel() -> void:
 	code_panel.show_logs(controller.logs)
 
 
+## 轻量计时器：性能排查时把各系统耗时加起来打印（默认关闭，零开销）
+var profile_enabled := false
+var profile_us: Dictionary = {}
+
+
+func _prof(tag: String, started_us: int) -> void:
+	if not profile_enabled:
+		return
+	profile_us[tag] = int(profile_us.get(tag, 0)) + (Time.get_ticks_usec() - started_us)
+
+
 func _physics_process(delta: float) -> void:
+	var _t_prof := Time.get_ticks_usec()
 	_physics_frames += 1
 	_delta_cache = delta
 	if mp != null:
@@ -1124,11 +1140,19 @@ func _physics_process(delta: float) -> void:
 	_prune_orders()
 	_prune_marks(delta)
 	_prune_commands(delta)
+	var _t0 := Time.get_ticks_usec()
 	_refresh_water_states(delta)
+	_prof("water", _t0)
+	_t0 = Time.get_ticks_usec()
 	_refresh_enemy_sensors()
+	_prof("sensors", _t0)
+	_t0 = Time.get_ticks_usec()
 	_tick_buildings(delta)
+	_prof("buildings", _t0)
 	_tick_peace(delta)
+	var _t_units := Time.get_ticks_usec()
 	for entry in units:
+		var _t_pre := Time.get_ticks_usec()
 		var controller: UnitController = entry["controller"]
 		var self_unit: RigidBody3D = entry["unit"]
 		if self_unit.alive:
@@ -1145,17 +1169,34 @@ func _physics_process(delta: float) -> void:
 			team_res["charger"] = facility_count(int(entry.get("team", TEAM_BLUE)), "charger")
 			controller.set_resources(team_res)
 			controller.sudden = _damage_scale() > 1.001
+		_prof("unit_pre", _t_pre)
+		var _t_tick := Time.get_ticks_usec()
 		controller.tick(delta)
+		_prof("unit_tick", _t_tick)
+	_prof("units", _t_units)
 	# 武器：发育时间里也能挖方块（只对单位断伤）；贴身钻头战斗只在开打后结算
+	var _t1 := Time.get_ticks_usec()
 	_process_cargo_transfers(delta)
+	_prof("cargo", _t1)
+	_t1 = Time.get_ticks_usec()
 	_process_unit_abilities(delta)
+	_prof("abilities", _t1)
+	_t1 = Time.get_ticks_usec()
 	_refresh_jamming()
+	_prof("jamming", _t1)
+	_t1 = Time.get_ticks_usec()
 	_process_weapons(delta)
+	_prof("weapons", _t1)
+	_t1 = Time.get_ticks_usec()
 	if not in_peace():
 		_process_combat(delta)
+	_prof("combat", _t1)
+	_t1 = Time.get_ticks_usec()
 	_flush_damage()
 	_purge_dead()
 	_check_victory()
+	_prof("cleanup", _t1)
+	_prof("physics_total", _t_prof)
 
 
 ## ---------------- 开局发育时间 ----------------
@@ -1332,7 +1373,7 @@ func _damage_block(cell: Vector3i, amount: float, team: int = -1) -> bool:
 	if total >= hp:
 		_block_damage.erase(cell)
 		var block_color: Color = world.db.color_of(block_id, false)
-		_spawn_sparks(Vector3(float(cell.x) + 0.5, float(cell.y) + 0.5, float(cell.z) + 0.5), block_color, 8, 5.0)
+		_spawn_sparks(Vector3(float(cell.x) + 0.5, float(cell.y) + 0.5, float(cell.z) + 0.5), block_color, 5, 5.0)
 		world.set_block(cell, BlockDB.AIR)
 		if team == TEAM_BLUE and economy != null:
 			economy.mine_block(block_id)
@@ -2047,13 +2088,17 @@ func _preset_for_unit(def: Dictionary) -> String:
 func _spawn_sparks(pos: Vector3, color: Color, count: int = 6, speed: float = 6.0) -> void:
 	if _fx_root == null:
 		return
+	var room: int = MAX_FX - _fx.size()
+	if room <= 0:
+		return
+	count = mini(count, room)
+	if _spark_mesh == null:
+		_spark_mesh = BoxMesh.new()
+		_spark_mesh.size = Vector3(0.075, 0.075, 0.075)
 	var mat: StandardMaterial3D = MatCache.of(color, true, 1.2, false, 0.95)
 	for i in count:
 		var shard := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		var s := 0.06 + randf() * 0.05
-		box.size = Vector3(s, s, s)
-		shard.mesh = box
+		shard.mesh = _spark_mesh
 		shard.material_override = mat
 		shard.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		_fx_root.add_child(shard)
@@ -2148,7 +2193,7 @@ func _flush_damage() -> void:
 			body.take_damage(float(pending[body]))
 			# 打击感：命中火花 + 自己人挨打时镜头轻震
 			var amount: float = float(pending[body])
-			_spawn_sparks(body.global_position, Color(1.0, 0.72, 0.30), 5, 6.0)
+			_spawn_sparks(body.global_position, Color(1.0, 0.72, 0.30), 3, 6.0)
 			if int(body.team) == TEAM_BLUE and rig != null:
 				rig.shake(clampf(amount / 60.0, 0.02, 0.16))
 
@@ -2199,6 +2244,24 @@ func _check_victory() -> void:
 	if game_over != "":
 		hud.show_overlay(game_over + "\n按 R 重开")
 		hud.show_message(game_over, 6.0)
+
+
+## 预热常用材质与状态图标：避免第一次出现火花/激光/图标时现编译卡一下
+func _prewarm_visuals() -> void:
+	for kind in [StatusBadges.Kind.NO_POWER, StatusBadges.Kind.BURIED,
+			StatusBadges.Kind.FOUNDATION, StatusBadges.Kind.STALLED, StatusBadges.Kind.OCCUPIED]:
+		StatusBadges.texture(kind)
+	MatCache.of(Color(1.0, 0.72, 0.30), true, 1.2, false, 0.95)   # 火花
+	MatCache.of(Color(1.0, 0.55, 0.25), true, 1.2, false, 0.95)   # 建筑爆散
+	MatCache.of(Color(1.0, 0.85, 0.55), true, 1.2, true, 0.42)    # 命中白闪
+	MatCache.of(Color(0.45, 0.85, 1.0), true, 0.6, true, 0.55)    # 施工幽灵
+	MatCache.of(Color(0.9, 0.25, 0.2), true, 0.5, false, 0.85)    # 罢工红
+	MatCache.of(Color(0.15, 0.40, 0.74, 0.80), false, 0.0, false, 0.80)  # 水
+	if unit_db != null:
+		for uid in unit_db.order:
+			for team in [TEAM_BLUE, TEAM_RED]:
+				MatCache.solid("u_body_%s_%d" % [str(uid), team], Color(0.2, 0.3, 0.6))
+				MatCache.solid("u_body_%s_%d" % [str(uid), team], Color(0.6, 0.2, 0.2))
 
 
 func _install_environment() -> void:

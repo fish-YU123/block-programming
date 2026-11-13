@@ -576,6 +576,8 @@ func _refresh_badge() -> void:
 		kind = StatusBadges.Kind.STALLED
 	StatusBadges.set_kind(_badge, kind)
 	if kind != StatusBadges.Kind.NONE:
+		var cam: Camera3D = get_viewport().get_camera_3d()
+		_badge.visible = cam != null and cam.global_position.distance_to(global_position) < 90.0
 		var bob := sin(_anim_t * 3.0) * 0.06
 		_badge.position = Vector3(0.0, float(size.y) + 0.9 + bob, 0.0)
 
