@@ -21,7 +21,7 @@ func _initialize() -> void:
 	var db := BlockDB.new()
 	var problem := db.load_dir("res://data/blocks")
 	_record("方块数据可加载", problem == "", problem)
-	_record("方块数量 = 11", db.defs.size() == 11, str(db.defs.size()))
+	_record("方块数量 = 12", db.defs.size() == 12, str(db.defs.size()))
 
 	var world := VoxelWorld.new()
 	root.add_child(world)
@@ -57,7 +57,7 @@ func _initialize() -> void:
 	_record("中立区地形正常起伏", nh > 3 and nh < 60)
 	_record("中立区表面和两侧同款方块", big.get_block(Vector3i(128, nh, 77)) == big.get_block(Vector3i(50, big.terrain.height_at(50, 77), 77)) or db.is_solid(big.get_block(Vector3i(128, nh, 77))))
 	_record("中立区地表下是石头/泥土", big.get_block(Vector3i(128, nh - 2, 77)) != BlockDB.AIR)
-	_record("中立区上方是空气", big.get_block(Vector3i(128, nh + 1, 77)) == BlockDB.AIR)
+	_record("中立区上方是空气或水", big.get_block(Vector3i(128, nh + 1, 77)) == BlockDB.AIR or big.get_block(Vector3i(128, nh + 1, 77)) == db.id_of("water"))
 	_record("中立区可以建造", big.is_buildable(Vector3i(128, nh, 77)))
 	_record("两侧可以建造", big.is_buildable(Vector3i(50, 20, 77)) and big.is_buildable(Vector3i(200, 20, 77)))
 	big.set_block(Vector3i(128, nh + 1, 77), db.id_of("planks"))

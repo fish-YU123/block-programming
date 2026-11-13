@@ -144,7 +144,7 @@ func _ready() -> void:
 	rig.primary_click.connect(_on_primary_click)
 
 	var spawn := Vector3(30.0, 0.0, WORLD_SIZE_Z * 0.5)
-	var h := world.surface_height(int(spawn.x), int(spawn.z))
+	var h := maxi(world.surface_height(int(spawn.x), int(spawn.z)), TerrainGen.SEA_LEVEL + 2)
 	rig.position = Vector3(spawn.x, float(h) + 16.0, spawn.z)
 	rig.yaw = -1.5708
 	# 不在这里同步建完 256 个区块（会冻住 4 秒多），改成每帧按预算建，配一个进度提示

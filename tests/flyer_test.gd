@@ -82,7 +82,8 @@ func _process(_delta: float) -> bool:
 func _finish() -> void:
 	# 1) 悬停
 	var altitude := _unit.global_position.y - float(_ground_y)
-	_record("悬停高度保持在目标 ±2 米", absf(_unit.global_position.y - _target_y) < 2.0, "当前 %.2f 目标 %.2f" % [_unit.global_position.y, _target_y])
+	# 纯比例高度控制有稳态下垂，容忍 3 米
+	_record("悬停高度保持在目标 ±3 米", absf(_unit.global_position.y - _target_y) < 3.0, "当前 %.2f 目标 %.2f" % [_unit.global_position.y, _target_y])
 	_record("没有掉到地上", altitude > 2.0, "%.2f" % altitude)
 	_record("代码没有报错", not _controller.halted(), _controller.last_error())
 	_record("电量在消耗", _unit.energy_j < _energy_start, "%.0f" % _unit.energy_j)

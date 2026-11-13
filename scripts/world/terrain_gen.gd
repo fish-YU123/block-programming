@@ -10,6 +10,8 @@ const MAP_WIDTH := 256
 const ZONE_A_END := 100
 const ZONE_B_START := 156
 const NEUTRAL_HEIGHT := 16.0
+## 海平面：高度低于它的坑会被水填满
+const SEA_LEVEL := 21
 const HILL_AMP := 6.0
 const DETAIL_AMP := 1.0
 
@@ -17,6 +19,8 @@ var _db: BlockDB
 var _continent := FastNoiseLite.new()
 var _hills := FastNoiseLite.new()
 var _detail := FastNoiseLite.new()
+## 低频噪声：挑出一些区域下沉成湖盆，海平面以下就会自动灌水
+var _lakes := FastNoiseLite.new()
 
 var id_air := 0
 var id_grass := 1
@@ -27,6 +31,7 @@ var id_coal := 5
 var id_copper := 6
 var id_iron := 9
 var id_gold := 10
+var id_water := 11
 var id_bedrock := 7
 
 var _height_cache := {}
@@ -55,6 +60,10 @@ func setup(db: BlockDB, world_seed: int) -> void:
 	_detail.seed = world_seed + 43
 	_detail.noise_type = FastNoiseLite.TYPE_SIMPLEX
 	_detail.frequency = 0.09
+	_lakes.seed = world_seed + 91
+	_lakes.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	_lakes.frequency = 0.012
+	_lakes.fractal_octaves = 2
 	_height_cache.clear()
 
 
@@ -85,6 +94,10 @@ func height_at(x: int, z: int) -> int:
 	var hills := _hills.get_noise_2d(float(x), float(z)) * HILL_AMP
 	var detail := _detail.get_noise_2d(float(x), float(z)) * DETAIL_AMP
 	var h := int(round(float(BASE_HEIGHT) + c * 10.0 + hills + detail))
+	# 湖盆：噪声高的区域整体下沉，最深能到海平面以下 6 格左右
+	var lake := _lakes.get_noise_2d(float(x), float(z))
+	if lake > 0.28:
+		h -= int(round((lake - 0.28) * 22.0))
 	var value := clampi(h, 3, 60)
 	_height_cache[key] = value
 	return value
@@ -104,6 +117,8 @@ func _mirror_x(x: int) -> int:
 ## 已算出该列高度 h 时的方块（避免重复查高度缓存）
 func block_at_height(x: int, y: int, z: int, h: int) -> int:
 	if y > h:
+		if y <= SEA_LEVEL and id_water != 0:
+			return id_water
 		return id_air
 	if y <= 0:
 		return id_bedrock

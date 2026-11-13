@@ -4,6 +4,7 @@ extends Node3D
 const BlockDB = preload("res://scripts/world/block_db.gd")
 const TerrainGen = preload("res://scripts/world/terrain_gen.gd")
 const TextureAtlas = preload("res://scripts/world/texture_atlas.gd")
+const MatCache = preload("res://scripts/core/mat_cache.gd")
 
 const CHUNK := 16
 const MAX_CHUNK_BUILDS_PER_FRAME := 1
@@ -13,6 +14,8 @@ class Chunk:
 	extends Node3D
 	var coord := Vector2i.ZERO
 	var mesh_instance: MeshInstance3D
+	## 水：单独一个透明网格，不参与碰撞
+	var water_mesh: MeshInstance3D
 	var body: StaticBody3D
 	var shape: ConcavePolygonShape3D
 	var col: CollisionShape3D
@@ -43,6 +46,8 @@ var _ao_dys: Array = []
 ## 方块 id -> 是否实心（AO 采样用，避免每像素查字典）
 var _solid_ids := PackedByteArray()
 var _opaque_ids := PackedByteArray()
+var _water_id := 0
+var _water_material: StandardMaterial3D
 ## 性能用：把面表/AO 表摊平成 Packed 数组，建网格时不再做数组套数组的查表
 var _face_corners: Array = []
 var _face_uv_corners: Array = []
@@ -147,6 +152,11 @@ func setup(block_db: BlockDB, world_seed: int, sx: int, sz: int, sy: int) -> voi
 			_solid_ids[def.id] = 1
 		if def.opaque:
 			_opaque_ids[def.id] = 1
+	_water_id = db.id_of("water")
+	_water_material = MatCache.of(Color(0.15, 0.40, 0.74, 0.80), false, 0.0, false, 0.80)
+	_water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_water_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_water_material.roughness = 0.15
 	_build_flat_tables()
 	# 每种方块顶/底/侧面的 UV 只查一次图集，生成网格时直接按 id 取
 	_uv_top.resize(db.defs.size())
@@ -484,7 +494,11 @@ func _build(coord: Vector2i) -> void:
 	chunk.col = col
 	col.shape = chunk.shape
 	chunk.body.add_child(col)
+	chunk.water_mesh = MeshInstance3D.new()
+	chunk.water_mesh.material_override = _water_material
+	chunk.water_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	chunk.add_child(chunk.mesh_instance)
+	chunk.add_child(chunk.water_mesh)
 	chunk.add_child(chunk.body)
 	chunks[coord] = chunk
 	_rebuild(chunk)
@@ -548,7 +562,8 @@ func _rebuild(chunk: Chunk) -> void:
 			var h: int = heights[lz * w + lx]
 			if h < 0:
 				continue
-			var top := mini(h, hi)
+			# 一直填到海平面：水这一层也要进缓冲区，否则水面永远画不出来
+			var top := mini(maxi(h, TerrainGen.SEA_LEVEL), hi)
 			for y in range(maxi(0, lo), top + 1):
 				buf[(y - lo) * w2 + lz * w + lx] = terrain.block_at_height(gx, y, gz, h)
 	# 应用玩家改动
@@ -564,6 +579,10 @@ func _rebuild(chunk: Chunk) -> void:
 	var uvs := PackedVector2Array()
 	var indices := PackedInt32Array()
 	var faces := PackedVector3Array()
+	# 水面单独一套（透明材质、不参与碰撞）
+	var w_verts := PackedVector3Array()
+	var w_normals := PackedVector3Array()
+	var w_indices := PackedInt32Array()
 	# 热点循环里全部用事先摊平的 Packed 表，避免函数调用与数组套数组的开销
 	var solid_ids := _solid_ids
 	var opaque_ids := _opaque_ids
@@ -585,7 +604,36 @@ func _rebuild(chunk: Chunk) -> void:
 			for y in range(lo, hi + 1):
 				var base := (y - lo) * w2 + (lz + 1) * w + (lx + 1)
 				var block_id: int = buf[base]
-				if block_id == BlockDB.AIR or solid_ids[block_id] == 0:
+				if block_id == BlockDB.AIR:
+					continue
+				if solid_ids[block_id] == 0:
+					if block_id != _water_id:
+						continue
+					# 水：只在与空气相邻的面画一层半透明水面
+					var water_pos := Vector3(gx, y, gz)
+					for wf in 6:
+						var wdir: Vector3i = face_dirs[wf]
+						var wny := y + wdir.y
+						var wnb: int
+						if wny < lo:
+							wnb = _bedrock_id
+						elif wny > hi:
+							wnb = BlockDB.AIR
+						else:
+							wnb = buf[base + wdir.y * w2 + wdir.z * w + wdir.x]
+						if wnb != BlockDB.AIR:
+							continue
+						var wbase := w_verts.size()
+						var wcorners: PackedVector3Array = face_corners[wf]
+						for k in 4:
+							w_verts.append(water_pos + wcorners[k])
+							w_normals.append(face_normals[wf])
+						w_indices.append(wbase)
+						w_indices.append(wbase + 1)
+						w_indices.append(wbase + 2)
+						w_indices.append(wbase)
+						w_indices.append(wbase + 2)
+						w_indices.append(wbase + 3)
 					continue
 				var cell_pos := Vector3(gx, y, gz)
 				for f in 6:
@@ -663,6 +711,17 @@ func _rebuild(chunk: Chunk) -> void:
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 		mesh.surface_set_material(0, _material)
 	chunk.mesh_instance.mesh = mesh
+	var w_arrays := []
+	w_arrays.resize(Mesh.ARRAY_MAX)
+	w_arrays[Mesh.ARRAY_VERTEX] = w_verts
+	w_arrays[Mesh.ARRAY_NORMAL] = w_normals
+	w_arrays[Mesh.ARRAY_INDEX] = w_indices
+	var water_mesh := ArrayMesh.new()
+	if w_verts.size() > 0:
+		water_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, w_arrays)
+		water_mesh.surface_set_material(0, _water_material)
+	if chunk.water_mesh != null:
+		chunk.water_mesh.mesh = water_mesh
 	# 注意：Jolt 物理后端不会因为 ConcavePolygonShape3D 内容变化就刷新静态体，
 	# 挖掉方块后碰撞会一直卡在原来的面上（钻头/激光射线打空）。所以每次重建都换一个新的
 	# StaticBody3D + CollisionShape3D。

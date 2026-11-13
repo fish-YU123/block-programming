@@ -1,0 +1,13 @@
+{
+  "id": 11,
+  "name": "water",
+  "display_name": "水",
+  "color": [
+    58,
+    120,
+    200
+  ],
+  "solid": false,
+  "opaque": false,
+  "hardness": 0.0
+}
