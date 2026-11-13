@@ -157,6 +157,7 @@ func setup(block_db: BlockDB, world_seed: int, sx: int, sz: int, sy: int) -> voi
 	_water_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_water_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_water_material.roughness = 0.15
+	_water_material.vertex_color_use_as_albedo = true
 	_build_flat_tables()
 	# 每种方块顶/底/侧面的 UV 只查一次图集，生成网格时直接按 id 取
 	_uv_top.resize(db.defs.size())
@@ -583,6 +584,7 @@ func _rebuild(chunk: Chunk) -> void:
 	var w_verts := PackedVector3Array()
 	var w_normals := PackedVector3Array()
 	var w_indices := PackedInt32Array()
+	var w_colors := PackedColorArray()
 	# 热点循环里全部用事先摊平的 Packed 表，避免函数调用与数组套数组的开销
 	var solid_ids := _solid_ids
 	var opaque_ids := _opaque_ids
@@ -610,6 +612,12 @@ func _rebuild(chunk: Chunk) -> void:
 					if block_id != _water_id:
 						continue
 					# 水：只在与空气相邻的面画一层半透明水面
+					# 往下数连续的水块，估出这一列水深（最多数 10 格）
+					var deep := 1
+					for yy in range(y - 1, maxi(lo, y - 11), -1):
+						if buf[(yy - lo) * w2 + (lz + 1) * w + (lx + 1)] != _water_id:
+							break
+						deep += 1
 					var water_pos := Vector3(gx, y, gz)
 					for wf in 6:
 						var wdir: Vector3i = face_dirs[wf]
@@ -625,9 +633,14 @@ func _rebuild(chunk: Chunk) -> void:
 							continue
 						var wbase := w_verts.size()
 						var wcorners: PackedVector3Array = face_corners[wf]
+						# 水越深，颜色越暗、越不透明（浅水清亮，深水发墨蓝）
+						var depth: float = clampf(float(deep) / 8.0, 0.0, 1.0)
+						var wcol := Color(0.30, 0.62, 0.88).lerp(Color(0.04, 0.16, 0.38), depth)
+						wcol.a = 0.45 + 0.45 * depth
 						for k in 4:
 							w_verts.append(water_pos + wcorners[k])
 							w_normals.append(face_normals[wf])
+							w_colors.append(wcol)
 						w_indices.append(wbase)
 						w_indices.append(wbase + 1)
 						w_indices.append(wbase + 2)
@@ -716,6 +729,7 @@ func _rebuild(chunk: Chunk) -> void:
 	w_arrays[Mesh.ARRAY_VERTEX] = w_verts
 	w_arrays[Mesh.ARRAY_NORMAL] = w_normals
 	w_arrays[Mesh.ARRAY_INDEX] = w_indices
+	w_arrays[Mesh.ARRAY_COLOR] = w_colors
 	var water_mesh := ArrayMesh.new()
 	if w_verts.size() > 0:
 		water_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, w_arrays)

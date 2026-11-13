@@ -28,6 +28,10 @@ var radar_unit_range := 8.0
 
 var team := 0
 var uid := 0
+## 当前泡在多深的水里（米），0 表示不在水里
+var water_depth := 0.0
+## 是否已经完全潜到水下（会隐身，非潜水单位会溺水）
+var submerged := false
 var max_hp := 320.0
 var hp := 320.0
 var alive := true

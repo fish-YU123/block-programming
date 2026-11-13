@@ -113,7 +113,43 @@ func _run() -> void:
 		str(_main.team_boards[_main.TEAM_BLUE].get("队友数量", -1.0)))
 	_record("代码能读回自己写进黑板的值", float(_main.team_boards[_main.TEAM_BLUE].get("黑板读数", 0.0)) == 3.0)
 
-	# 8) 标点 30 秒过期
+	# 8) 跨单位指令：command(uid, 动作, x, y, z)
+	var blue_entry: Dictionary = _blue()
+	var target_uid: int = int(blue_entry["uid"])
+	var bad_action: String = _main.issue_command(_main.TEAM_BLUE, target_uid, "跳舞", 0.0, 0.0, 0.0)
+	_record("非法指令动作被拒绝", bad_action.contains("没有这种指令"), bad_action)
+	var unknown: String = _main.issue_command(_main.TEAM_BLUE, 99999, "goto", 0.0, 0.0, 0.0)
+	_record("给不存在的编号下指令被拒绝", unknown.contains("找不到"), unknown)
+	# 给敌方单位下指令要被拒绝
+	var red_list: Array = _main.team_units(_main.TEAM_RED)
+	var red_uid: int = int(red_list[0]["uid"]) if red_list.size() > 0 else -1
+	if red_uid > 0:
+		var cross: String = _main.issue_command(_main.TEAM_BLUE, red_uid, "goto", 0.0, 0.0, 0.0)
+		_record("不能给敌方单位下指令", cross.contains("敌人"), cross)
+	var ok_cmd: String = _main.issue_command(_main.TEAM_BLUE, target_uid, "goto", 60.0, 30.0, 128.0)
+	_record("合法指令下发成功", ok_cmd == "", ok_cmd)
+	var got_cmd: Dictionary = _main._command_for(target_uid)
+	_record("指令能送到目标单位", str(got_cmd.get("action", "")) == "goto" and absf(float(got_cmd.get("x", 0.0)) - 60.0) < 0.01,
+		str(got_cmd))
+	# 新指令覆盖旧指令（同一个单位只保留最新一条）
+	_main.issue_command(_main.TEAM_BLUE, target_uid, "hold", 0.0, 0.0, 0.0)
+	_record("新指令覆盖旧指令", str(_main._command_for(target_uid).get("action", "")) == "hold")
+	_main._prune_commands(13.0)
+	_record("指令 12 秒后过期", _main._command_for(target_uid).is_empty())
+
+	# 9) 代码里可以调 command()
+	var issuer: String = """def loop():
+    command(%d, "goto", 70.0, 32.0, 120.0)
+    set_velocity(0.0, 0.0)
+""" % target_uid
+	controller.bind(entry["unit"], issuer, 88)
+	for i in range(80):
+		controller.tick(1.0 / 60.0)
+	_record("代码里能下指令", str(_main._command_for(target_uid).get("action", "")) == "goto")
+	_record("下指令的代码没报错", not controller.halted(), controller.last_error())
+	_main._prune_commands(13.0)
+
+	# 10) 标点 30 秒过期
 	_main._prune_marks(31.0)
 	_record("标点会过期", _main.team_marks[_main.TEAM_BLUE].size() == 0,
 		str(_main.team_marks[_main.TEAM_BLUE].size()))

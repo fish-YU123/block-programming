@@ -30,7 +30,9 @@ func _initialize() -> void:
 	var h := world.surface_height(10, 10)
 	_record("地表高度合理", h > 0 and h < 48, str(h))
 	_record("地表是草或沙", db.get_def(world.get_block(Vector3i(10, h - 1, 10))) != null)
-	_record("地表上方是空气", world.get_block(Vector3i(10, h + 2, 10)) == BlockDB.AIR)
+	# 现在有湖，地表上方可能灌了水
+	var above: int = world.get_block(Vector3i(10, h + 2, 10))
+	_record("地表上方是空气或水", above == BlockDB.AIR or above == db.id_of("water"), str(above))
 	_record("底层是基岩", world.get_block(Vector3i(10, 0, 10)) == db.id_of("bedrock"))
 	_record("世界外是空气", world.get_block(Vector3i(-1, 10, 10)) == BlockDB.AIR)
 

@@ -17,7 +17,7 @@ const BUILTINS := [
 	"print", "set_drive", "set_spin", "set_steer", "set_thrust", "get_link",
 	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot", "go_to", "stop", "find_path", "set_velocity", "set_altitude",
 	"build", "build_here", "place", "transfer",
-	"team_set", "team_get", "mark",
+	"team_set", "team_get", "mark", "command",
 	"range", "len", "abs", "min", "max", "int", "float", "str", "round", "bool",
 ]
 
@@ -42,6 +42,8 @@ var place_provider: Callable = Callable()
 var team_set_provider: Callable = Callable()
 var team_get_provider: Callable = Callable()
 var mark_provider: Callable = Callable()
+## 跨单位直接下指令：command(uid, 动作, x, y, z)
+var command_provider: Callable = Callable()
 var logs: Array = []
 var error := ""
 var finished := false
@@ -995,6 +997,21 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 				on = float(flag) != 0.0
 			state["controls"]["transfer"] = on
 			stack.append(null)
+			return true
+		"command":
+			if args.size() < 2 or not _is_num(args[0]) or not _is_str(args[1]):
+				return _fail("TypeError", "command(uid, 动作, x, y, z)：给某个队友下指令，动作是 goto / attack / hold", op, ins)
+			var cx := 0.0
+			var cy := 0.0
+			var cz := 0.0
+			if args.size() >= 5:
+				cx = float(args[2])
+				cy = float(args[3])
+				cz = float(args[4])
+			var cmd_err := ""
+			if command_provider.is_valid():
+				cmd_err = str(command_provider.call(int(args[0]), str(args[1]), cx, cy, cz))
+			stack.append(cmd_err)
 			return true
 		"team_set":
 			if args.size() != 2 or not _is_str(args[0]):

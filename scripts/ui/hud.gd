@@ -14,6 +14,9 @@ var loading_label: Label
 var peace_label: Label
 var left_panel: PanelContainer
 var right_panel: PanelContainer
+## 队伍面板（右侧，Tab 开关）：每台我方单位的血量/电量/正在干什么
+var squad_panel: PanelContainer
+var squad_label: Label
 var hint_panel: PanelContainer
 var peace_bar: ProgressBar
 var _loading_bg: ColorRect
@@ -21,6 +24,32 @@ var _message_timer := 0.0
 
 
 ## 统一的 HUD 底板：半透明深色 + 圆角 + 细边
+## 队伍面板：右侧一列，显示每台我方单位的即时状态
+func _build_squad_panel() -> void:
+	squad_panel = _make_panel()
+	squad_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	squad_panel.position = Vector2(-300, 96)
+	squad_panel.custom_minimum_size = Vector2(284, 0)
+	squad_panel.visible = false
+	add_child(squad_panel)
+
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	squad_panel.add_child(box)
+
+	var title := Label.new()
+	title.text = "我方单位（Tab 关闭）"
+	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_color_override("font_color", Color(0.62, 0.74, 0.95))
+	box.add_child(title)
+
+	squad_label = Label.new()
+	squad_label.text = ""
+	squad_label.add_theme_font_size_override("font_size", 12)
+	squad_label.add_theme_color_override("font_color", Color(0.88, 0.94, 1.0))
+	box.add_child(squad_label)
+
+
 func _make_panel() -> PanelContainer:
 	var panel := PanelContainer.new()
 	var style := StyleBoxFlat.new()
@@ -133,6 +162,8 @@ func _ready() -> void:
 	loading_label.text = ""
 	add_child(loading_label)
 
+	_build_squad_panel()
+
 	overlay_label = Label.new()
 	overlay_label.set_anchors_preset(Control.PRESET_CENTER)
 	overlay_label.position = Vector2(-300, -60)
@@ -201,6 +232,21 @@ func set_loading(text: String) -> void:
 
 func show_overlay(text: String) -> void:
 	overlay_label.text = text
+
+
+## 队伍面板内容：每行一台单位
+func set_squad(text: String) -> void:
+	if squad_label != null:
+		squad_label.text = text
+
+
+func toggle_squad() -> void:
+	if squad_panel != null:
+		squad_panel.visible = not squad_panel.visible
+
+
+func squad_visible() -> bool:
+	return squad_panel != null and squad_panel.visible
 
 
 func set_resources(text: String) -> void:

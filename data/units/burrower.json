@@ -35,5 +35,6 @@
     "damage_block": 0.0,
     "damage_unit": 0.0,
     "energy_j": 0.0
-  }
+  },
+  "dive": true
 }

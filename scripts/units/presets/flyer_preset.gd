@@ -18,6 +18,16 @@ def start():
     print("飞飞启动，地面高度 ", heights[2][2])
 
 def loop():
+    # 队友下的指令优先
+    if len(cmd) > 0:
+        if cmd.action == "goto":
+            set_velocity(max(-14, min(14, (cmd.x - pos.x) * 0.5)),
+                         max(-14, min(14, (cmd.z - pos.z) * 0.5)))
+            set_altitude(cmd.y)
+            return
+        if cmd.action == "hold":
+            set_velocity(0.0, 0.0)
+            return
     # 1) 决定去哪：有玩家的标记就去最近的标记，否则去目标点
     去x = 目标x
     去y = 目标y

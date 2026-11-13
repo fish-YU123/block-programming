@@ -22,6 +22,8 @@ var allies: Array = []
 ## 全队共享黑板 / 标点：main 里每队只有一份，这里拿的是同一个引用
 var board: Dictionary = {}
 var marks: Array = []
+## 收到的指令（latest）：{action, x, y, z, from}
+var cmd: Dictionary = {}
 var orders: Array = []
 ## 建筑接口（由 main 注入）：func(id: String, cell: Vector3i) -> String / func(id: String) -> String
 var build_provider: Callable = Callable()
@@ -30,6 +32,7 @@ var place_provider: Callable = Callable()
 var team_set_provider: Callable = Callable()
 var team_get_provider: Callable = Callable()
 var mark_provider: Callable = Callable()
+var command_provider: Callable = Callable()
 ## 开局发育时间剩余秒数（>0 时双方不能攻击）
 var peace_left := 0.0
 ## 全队资源（字典，由 main 每帧喂进来）
@@ -255,6 +258,10 @@ func _wire_path_provider() -> void:
 	_vm.mark_provider = func(x: float, y: float, z: float, tag: String) -> void:
 		if mark_provider.is_valid():
 			mark_provider.call(x, y, z, tag)
+	_vm.command_provider = func(target_uid: int, action: String, x: float, y: float, z: float) -> String:
+		if command_provider.is_valid():
+			return str(command_provider.call(target_uid, action, x, y, z))
+		return "没有指令接口"
 
 
 ## sense() 里的 pos 是 {x,y,z} 字典，这里转成 Vector3
@@ -298,6 +305,9 @@ func _inject_sensors(refresh_lists: bool) -> void:
 			"allies": allies.duplicate(true),
 			"team_mem": board.duplicate(true),
 			"marks": _marks_near(_pos_vec(s["pos"])),
+			"cmd": cmd.duplicate(true),
+			"water": unit.get("water_depth") if unit.get("water_depth") != null else 0.0,
+			"submerged": 1 if bool(unit.get("submerged")) else 0,
 			"ore": _nearest_ore(blocks3, s["cell"]),
 			"below": _first_solid_below(unit, s["pos"]),
 		}
@@ -323,6 +333,9 @@ func _inject_sensors(refresh_lists: bool) -> void:
 		"allies": _list_snapshot.get("allies", []),
 		"team_mem": _list_snapshot.get("team_mem", {}),
 		"marks": _list_snapshot.get("marks", []),
+		"cmd": _list_snapshot.get("cmd", {}),
+		"water": _list_snapshot.get("water", 0.0),
+		"submerged": _list_snapshot.get("submerged", 0),
 		"ore": _list_snapshot.get("ore", {}),
 		"below": _list_snapshot.get("below", {}),
 		"moving": unit.moving,

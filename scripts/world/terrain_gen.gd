@@ -96,8 +96,8 @@ func height_at(x: int, z: int) -> int:
 	var h := int(round(float(BASE_HEIGHT) + c * 10.0 + hills + detail))
 	# 湖盆：噪声高的区域整体下沉，最深能到海平面以下 6 格左右
 	var lake := _lakes.get_noise_2d(float(x), float(z))
-	if lake > 0.28:
-		h -= int(round((lake - 0.28) * 22.0))
+	if lake > 0.24:
+		h -= int(round((lake - 0.24) * 34.0))
 	var value := clampi(h, 3, 60)
 	_height_cache[key] = value
 	return value

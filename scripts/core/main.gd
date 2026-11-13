@@ -84,6 +84,9 @@ var team_boards: Dictionary = {}
 ## 每队一份共享标点列表（玩家代码里用 mark 写，用 marks 读），30 秒自动过期
 var team_marks: Dictionary = {}
 const MARK_TTL := 30.0
+## 跨单位指令：每条 12 秒后自动失效
+var unit_commands: Array = []
+const COMMAND_TTL := 12.0
 var _next_uid := 1
 var game_over := ""
 var _physics_frames := 0
@@ -864,6 +867,8 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 		_board_for(team)[key] = value
 	controller.team_get_provider = func(key: String, fallback):
 		return _board_for(team).get(key, fallback)
+	controller.command_provider = func(target_uid: int, action: String, cx: float, cy: float, cz: float) -> String:
+		return issue_command(team, target_uid, action, cx, cy, cz)
 	controller.mark_provider = func(x: float, y: float, z: float, tag: String) -> void:
 		var list: Array = _marks_for(team)
 		for old in list:
@@ -1081,6 +1086,8 @@ func _physics_process(delta: float) -> void:
 		production.tick(delta)
 	_prune_orders()
 	_prune_marks(delta)
+	_prune_commands(delta)
+	_refresh_water_states(delta)
 	_refresh_enemy_sensors()
 	_tick_buildings(delta)
 	_tick_peace(delta)
@@ -1094,6 +1101,7 @@ func _physics_process(delta: float) -> void:
 			controller.board = _board_for(my_team_id)
 			controller.marks = _marks_for(my_team_id)
 			controller.allies = _allies_for(self_unit, my_team_id)
+			controller.cmd = _command_for(int(entry["uid"]))
 			var team_res: Dictionary = _economy_for(int(entry.get("team", TEAM_BLUE))).all()
 			team_res["power"] = int(power_of(int(entry.get("team", TEAM_BLUE))))
 			team_res["repair"] = facility_count(int(entry.get("team", TEAM_BLUE)), "repairbay")
@@ -1368,6 +1376,70 @@ func _allies_for(self_unit: RigidBody3D, team: int) -> Array:
 	return out
 
 
+## 给某个单位下指令（只能下给自己队伍的单位）
+func issue_command(team: int, target_uid: int, action: String, x: float, y: float, z: float) -> String:
+	var allowed := ["goto", "attack", "hold"]
+	if not allowed.has(action):
+		return "没有这种指令：%s（可用 goto / attack / hold）" % action
+	for entry in units:
+		if int(entry["uid"]) != target_uid:
+			continue
+		if int(entry.get("team", TEAM_BLUE)) != team:
+			return "那是敌人的单位"
+		# 同一个人只保留最新一条
+		var kept: Array = []
+		for c in unit_commands:
+			if int(c.get("to_uid", -1)) != target_uid:
+				kept.append(c)
+		unit_commands = kept
+		unit_commands.append({"to_uid": target_uid, "team": team, "action": action, "x": x, "y": y, "z": z, "t": 0.0})
+		return ""
+	return "找不到这个编号的单位：%d" % target_uid
+
+
+## 某台单位当前该执行的指令（没有就空字典）
+func _command_for(uid: int) -> Dictionary:
+	for c in unit_commands:
+		if int(c.get("to_uid", -1)) == uid:
+			return {"action": str(c["action"]), "x": float(c["x"]), "y": float(c["y"]), "z": float(c["z"])}
+	return {}
+
+
+func _prune_commands(delta: float) -> void:
+	var kept: Array = []
+	for c in unit_commands:
+		c["t"] = float(c.get("t", 0.0)) + delta
+		if float(c["t"]) <= COMMAND_TTL:
+			kept.append(c)
+	unit_commands = kept
+
+
+## 每帧算每台单位在水里多深、是否已经完全潜下去
+func _refresh_water_states(delta: float) -> void:
+	var water_id: int = world.db.id_of("water") if world != null and world.db != null else -1
+	for entry in units:
+		var u: RigidBody3D = entry["unit"]
+		if not u.alive:
+			continue
+		var cell := Vector3i(floori(u.global_position.x), floori(u.global_position.y), floori(u.global_position.z))
+		var in_water: bool = water_id >= 0 and world.get_block(cell) == water_id
+		if not in_water:
+			u.water_depth = 0.0
+			u.submerged = false
+			continue
+		# 水面高度（海平面上一格）
+		var surface := float(TerrainGen.SEA_LEVEL + 1)
+		u.water_depth = maxf(0.0, surface - u.global_position.y)
+		u.submerged = u.water_depth >= 0.9
+		var dive: bool = bool(entry.get("def", {}).get("dive", false))
+		if u.submerged and not dive:
+			# 不会潜水的单位泡在深水里会溺水（每秒 10 点），顺便减速
+			u.take_damage(10.0 * delta)
+			u.linear_damp = 3.0
+		elif dive:
+			u.linear_damp = 0.9
+
+
 ## 标点过期清理（30 秒）
 func _prune_marks(delta: float) -> void:
 	for team in team_marks.keys():
@@ -1394,6 +1466,9 @@ func _refresh_enemy_sensors() -> void:
 		for other in team_units(enemy_team):
 			var o: RigidBody3D = other["unit"]
 			if not o.alive:
+				continue
+			# 完全潜到水下就看不见了（会潜水的单位可以偷袭）
+			if bool(o.get("submerged")):
 				continue
 			var dist: float = self_unit.global_position.distance_to(o.global_position)
 			if dist > sensor_range:
@@ -2053,6 +2128,7 @@ func _process(_delta: float) -> void:
 	_sync_wheel_state()
 	world.update_streaming(rig.position)
 	_update_loading_hint()
+	_update_squad_panel()
 	_update_highlight()
 	_update_unit_hud()
 	_update_code_panel()
@@ -2107,6 +2183,34 @@ func _update_loading_hint() -> void:
 	var percent := int(float(built) / float(total) * 100.0)
 	hud.set_loading("正在生成世界  %d%%" % percent)
 	_world_ready_shown = true
+
+
+## 队伍面板：每台我方单位一行（血量/电量/状态）
+func _update_squad_panel() -> void:
+	if hud == null or not hud.squad_visible():
+		return
+	var lines: Array = []
+	for entry in team_units(TEAM_BLUE):
+		var u: RigidBody3D = entry["unit"]
+		var controller: UnitController = entry["controller"]
+		var state := ""
+		if controller.halted():
+			state = "代码报错"
+		elif not controller.cmd.is_empty():
+			state = "指令 " + str(controller.cmd.get("action", ""))
+		elif controller.moving:
+			state = "飞行中"
+		elif bool(u.submerged):
+			state = "潜水中"
+		elif u.water_depth > 0.0:
+			state = "涉水"
+		else:
+			state = "待命"
+		lines.append("%s  HP %d%%  电 %d%%  %s" % [
+			str(u.name), int(round(u.hp / u.max_hp * 100.0)), int(round(u.energy_j / u.energy_max * 100.0)), state])
+	if lines.is_empty():
+		lines.append("（没有单位）")
+	hud.set_squad("\n".join(lines))
 
 
 func _update_highlight() -> void:
@@ -2254,6 +2358,10 @@ func _input(event: InputEvent) -> void:
 		return
 	if event.keycode == KEY_C:
 		_toggle_code_panel()
+		return
+	if event.keycode == KEY_TAB:
+		if hud != null:
+			hud.toggle_squad()
 		return
 	if _code_typing():
 		return

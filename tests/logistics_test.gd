@@ -52,7 +52,8 @@ func _flat(near: Vector2i, sx: int, sz: int) -> Vector3i:
 				for oz in range(sz):
 					if int(w.surface_height(x + ox, z + oz)) != h:
 						flat = false
-			if flat:
+			# 水面以上的地块才算「平地」，否则建筑会被水占住
+			if flat and _main.world.get_block(Vector3i(x, h, z)) == _main.db.id_of("air"):
 				return Vector3i(x, h, z)
 	return Vector3i(-1, -1, -1)
 
