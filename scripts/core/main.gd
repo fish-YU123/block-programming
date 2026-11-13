@@ -19,6 +19,7 @@ const Building = preload("res://scripts/buildings/building.gd")
 const TerrainGen = preload("res://scripts/world/terrain_gen.gd")
 const MpManager = preload("res://scripts/net/mp_manager.gd")
 const MpPanel = preload("res://scripts/ui/mp_panel.gd")
+const StatusBadges = preload("res://scripts/ui/status_badges.gd")
 const MatCache = preload("res://scripts/core/mat_cache.gd")
 
 const WORLD_SIZE_X := 256
@@ -92,6 +93,8 @@ var game_over := ""
 var _physics_frames := 0
 var units_root: Node3D
 var buildings_root: Node3D
+var _fx_root: Node3D
+var _fx: Array = []
 ## 预设单位 + 玩家代码（现在还没有编辑器，先用默认代码）
 const MAX_UNITS := 20
 const START_UNITS := [{"id": "feifei", "x": 34.0, "z": 128.0, "code": DefaultCode.COMMANDER_SOURCE}]
@@ -170,6 +173,9 @@ func _ready() -> void:
 	units_root = Node3D.new()
 	units_root.name = "Units"
 	add_child(units_root)
+	_fx_root = Node3D.new()
+	_fx_root.name = "Fx"
+	add_child(_fx_root)
 	_load_unit_db()
 	if unit_db != null and unit_db.has("feifei"):
 		selected_unit = unit_db.order.find("feifei")
@@ -247,6 +253,10 @@ func _damage_building(node: Node3D, amount: float) -> void:
 var command_lost: Array = [false, false]   ## 每队指挥中心有没有被拆掉
 
 func _remove_building(node: Node3D) -> void:
+	if node != null and is_instance_valid(node):
+		_spawn_sparks(node.global_position + Vector3(0.0, 1.0, 0.0), Color(1.0, 0.55, 0.25), 14, 8.0)
+		if rig != null:
+			rig.shake(0.12)
 	for i in range(buildings.size() - 1, -1, -1):
 		if buildings[i]["node"] == node:
 			buildings.remove_at(i)
@@ -839,12 +849,37 @@ func _make_unit_node(def: Dictionary) -> RigidBody3D:
 	return Flyer.new()
 
 
+## 找一个不和其它单位重叠的出生点：先试原点，再一圈圈往外扩
+func _free_spawn_position(target: Vector3, unit_size: float) -> Vector3:
+	var need: float = maxf(0.75, unit_size) * 1.6
+	for ring in range(0, 7):
+		var radius: float = float(ring) * need * 0.85
+		var count: int = 1 if ring == 0 else 8
+		for i in count:
+			var angle: float = TAU * float(i) / float(count) + float(ring) * 0.4
+			var candidate := target + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+			if _spot_is_free(candidate, need):
+				return candidate
+	return target
+
+
+func _spot_is_free(pos: Vector3, need: float) -> bool:
+	for entry in units:
+		var other = entry.get("unit", null)
+		if other == null or not is_instance_valid(other) or not other.alive:
+			continue
+		if other.global_position.distance_to(pos) < need:
+			return false
+	return true
+
+
 func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BLUE) -> void:
 	var unit := _make_unit_node(def)
 	unit.name = "%s_%d" % [str(def.get("id", "unit")), units.size() + 1]
 	units_root.add_child(unit)
 	var ground := world.surface_height(int(at.x), int(at.z))
-	unit.global_position = Vector3(at.x, float(ground) + 6.0, at.z)
+	var spawn := _free_spawn_position(Vector3(at.x, float(ground) + 6.0, at.z), float(def.get("size", 0.9)))
+	unit.global_position = spawn
 	unit.team = team
 	unit.uid = _next_uid
 	# 红方补偿：完全对称的 AI 对局里红方略吃亏（先手框架/遍历顺序），给一点血量补偿拉平胜率
@@ -1296,6 +1331,8 @@ func _damage_block(cell: Vector3i, amount: float, team: int = -1) -> bool:
 	var total := float(_block_damage.get(cell, 0.0)) + amount
 	if total >= hp:
 		_block_damage.erase(cell)
+		var block_color: Color = world.db.color_of(block_id, false)
+		_spawn_sparks(Vector3(float(cell.x) + 0.5, float(cell.y) + 0.5, float(cell.z) + 0.5), block_color, 8, 5.0)
 		world.set_block(cell, BlockDB.AIR)
 		if team == TEAM_BLUE and economy != null:
 			economy.mine_block(block_id)
@@ -1795,6 +1832,7 @@ func _tick_buildings(delta: float) -> void:
 			continue
 		# 还在施工（默认 10 秒）不产出：进度按物理帧推进
 		# 占地体积里被方块占住了（比如被埋进石头）也罢工，等清出来再继续
+		# 被方块埋住（占地方块不为空气）就不能工作
 		var blocked: bool = not node.has_clear_volume()
 		node.set_blocked_look(blocked)
 		if blocked:
@@ -2005,6 +2043,49 @@ func _preset_for_unit(def: Dictionary) -> String:
 	return DefaultCode.COMMANDER_SOURCE
 
 
+## 命中火花：一小把会飞散的自发光小碎片，0.35 秒后消失
+func _spawn_sparks(pos: Vector3, color: Color, count: int = 6, speed: float = 6.0) -> void:
+	if _fx_root == null:
+		return
+	var mat: StandardMaterial3D = MatCache.of(color, true, 1.2, false, 0.95)
+	for i in count:
+		var shard := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		var s := 0.06 + randf() * 0.05
+		box.size = Vector3(s, s, s)
+		shard.mesh = box
+		shard.material_override = mat
+		shard.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_fx_root.add_child(shard)
+		shard.global_position = pos
+		var dir := Vector3(randf_range(-1.0, 1.0), randf_range(0.2, 1.0), randf_range(-1.0, 1.0)).normalized()
+		_fx.append({"node": shard, "vel": dir * speed * randf_range(0.6, 1.3), "life": 0.35, "max": 0.35})
+
+
+func fx_count() -> int:
+	return _fx.size()
+
+
+func _update_fx(delta: float) -> void:
+	var keep: Array = []
+	for f in _fx:
+		var node = f["node"]
+		if not is_instance_valid(node):
+			continue
+		f["life"] = float(f["life"]) - delta
+		if float(f["life"]) <= 0.0:
+			node.queue_free()
+			continue
+		var vel: Vector3 = f["vel"]
+		vel.y -= 18.0 * delta
+		f["vel"] = vel
+		node.global_position += vel * delta
+		var k: float = clampf(float(f["life"]) / float(f["max"]), 0.05, 1.0)
+		node.scale = Vector3.ONE * k
+		keep.append(f)
+	_fx = keep
+
+
 ## 单位按代码在指定格放一块方块：要扣资源和电量，非法位置返回错误字符串
 func place_block_for(unit: RigidBody3D, kind: String, cell: Vector3i) -> String:
 	if world == null or db == null:
@@ -2065,6 +2146,11 @@ func _flush_damage() -> void:
 	for body in pending.keys():
 		if is_instance_valid(body) and body.alive:
 			body.take_damage(float(pending[body]))
+			# 打击感：命中火花 + 自己人挨打时镜头轻震
+			var amount: float = float(pending[body])
+			_spawn_sparks(body.global_position, Color(1.0, 0.72, 0.30), 5, 6.0)
+			if int(body.team) == TEAM_BLUE and rig != null:
+				rig.shake(clampf(amount / 60.0, 0.02, 0.16))
 
 
 func _process_combat(delta: float) -> void:
@@ -2165,6 +2251,7 @@ func _process(_delta: float) -> void:
 			_start_game()
 		return
 	_sync_input_state()
+	_update_fx(_delta)
 	_update_debug_hud()
 	_sync_wheel_state()
 	world.update_streaming(rig.position)

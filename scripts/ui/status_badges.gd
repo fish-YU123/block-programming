@@ -12,6 +12,7 @@ enum Kind {
 	BURIED = 2,      ## 被方块埋住 / 占地被占：棕色方块 + 红叉
 	FOUNDATION = 3,  ## 地基不牢：橙色警示三角
 	STALLED = 4,     ## 代码报错 / 停机：红色感叹号
+	OCCUPIED = 5,    ## 占地范围里有单位挡着：青色方块 + 黄三角
 }
 
 const TEXTURE_SIZE := 64
@@ -44,6 +45,11 @@ static func texture(kind: int) -> Texture2D:
 			_draw_disc(img, Color(0.05, 0.06, 0.08, 0.85))
 			_draw_ring(img, Color(0.95, 0.25, 0.2, 1.0), 2)
 			_draw_exclamation(img, Color(0.98, 0.3, 0.25, 1.0))
+		Kind.OCCUPIED:
+			_draw_disc(img, Color(0.05, 0.06, 0.08, 0.85))
+			_draw_ring(img, Color(0.35, 0.85, 0.95, 1.0), 2)
+			_draw_triangle(img, Color(0.98, 0.78, 0.25, 1.0), Color(0.35, 0.25, 0.02, 1.0))
+			_draw_exclamation(img, Color(0.25, 0.18, 0.0, 1.0))
 		_:
 			img.fill(Color(0, 0, 0, 0))
 	var tex := ImageTexture.create_from_image(img)

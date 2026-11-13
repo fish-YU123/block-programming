@@ -10,6 +10,8 @@ var yaw := 0.0
 var pitch := -0.25
 var move_speed := 14.0
 var fov := 70.0
+## 镜头震动强度（0 = 不震），受击/爆炸时由 main 调用 shake()
+var shake_amount := 0.0
 var fast_multiplier := 3.0
 var mouse_sensitivity := 0.0035
 var dragging := false
@@ -106,8 +108,21 @@ func _unhandled_input(event: InputEvent) -> void:
 			look_changed.emit()
 
 
+## 让镜头抖一下（叠加式，取最大值，避免连击时抖成抽搐）
+func shake(amount: float) -> void:
+	shake_amount = maxf(shake_amount, clampf(amount, 0.0, 0.3))
+
+
 func _process(delta: float) -> void:
 	rotation = Vector3(pitch, yaw, 0.0)
+	# 震动：偏移只作用在相机本体的局部位置，不影响 yaw/pitch
+	if camera != null:
+		if shake_amount > 0.001:
+			var s := shake_amount
+			camera.position = Vector3(randf_range(-s, s), randf_range(-s, s), 0.0)
+			shake_amount = maxf(0.0, shake_amount - delta * 1.6)
+		else:
+			camera.position = Vector3.ZERO
 	if _pressing:
 		# Minecraft 式：每帧把鼠标传回按下点，位置保持不变
 		_last_offset = Vector2.ZERO

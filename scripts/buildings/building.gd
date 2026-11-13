@@ -29,7 +29,9 @@ var world = null
 var _saved_materials: Dictionary = {}
 var _construction := false
 var _unsupported := false
-var _blocked := false            ## 占地体积被方块占住了（盖在石头里 / 后来被填上）
+var _blocked := false
+## 是不是被单位（而不是方块）挡住
+var _blocked_by_unit := false            ## 占地体积被方块占住了（盖在石头里 / 后来被填上）
 var _stalled := false            ## 缺电停工（发电站没煤 / 炮塔、充电站没电）
 var _construction_mat: ShaderMaterial = null
 var _badge: Sprite3D = null      ## 屋顶状态图标（地基不牢 / 被埋）
@@ -476,12 +478,17 @@ func has_clear_volume() -> bool:
 
 
 ## 被方块占住时也罢工（外观和缺地基一样是红的，只是原因不同）
-func set_blocked_look(on: bool) -> void:
-	if on == _blocked:
+func set_blocked_look(on: bool, by_unit: bool = false) -> void:
+	if on == _blocked and by_unit == _blocked_by_unit:
 		return
 	_blocked = on
+	_blocked_by_unit = by_unit
 	_apply_strike_look(_blocked or _unsupported)
 	_refresh_badge()
+
+
+func is_blocked_by_unit() -> bool:
+	return _blocked_by_unit
 
 
 func is_blocked() -> bool:
@@ -559,6 +566,8 @@ func _refresh_badge() -> void:
 	var kind: int = StatusBadges.Kind.NONE
 	if is_under_construction():
 		kind = StatusBadges.Kind.NONE
+	elif _blocked_by_unit:
+		kind = StatusBadges.Kind.OCCUPIED
 	elif _blocked:
 		kind = StatusBadges.Kind.BURIED
 	elif _unsupported:

@@ -83,6 +83,8 @@ var _flame: MeshInstance3D
 var _radar_dome: MeshInstance3D
 var _rcs_jets: Array = []
 var _anim_time := 0.0
+var hit_flash := 0.0
+var _hit_sphere: MeshInstance3D = null
 var _gun_kick := 0.0
 var _badge: Sprite3D = null      ## 头顶状态图标（没电等）
 var _barrel: MeshInstance3D
@@ -145,7 +147,7 @@ func setup(world_node: Node3D, def: Dictionary) -> void:
 	continuous_cd = true
 	contact_monitor = false
 	collision_layer = 2
-	collision_mask = 1
+	collision_mask = 1 | 2 | 4  # 也要和别的单位撞，不能互相穿模
 	_build_visual()
 	_badge = StatusBadges.make_sprite(self, Vector3(0.0, unit_size + 0.45, 0.0))
 
@@ -356,6 +358,24 @@ func _animate(delta: float) -> void:
 		_gun_kick = maxf(0.0, _gun_kick - delta * 6.0)
 		if _barrel != null:
 			_barrel.position.z = -0.42 * (1.0 - 0.12 * _gun_kick)
+	# 被打中的白闪：一个小小的自发光球，命中瞬间亮一下再缩掉
+	if hit_flash > 0.0:
+		hit_flash = maxf(0.0, hit_flash - delta)
+		if _hit_sphere == null:
+			_hit_sphere = MeshInstance3D.new()
+			var sphere := SphereMesh.new()
+			sphere.radius = unit_size * 0.42
+			sphere.height = unit_size * 0.84
+			_hit_sphere.mesh = sphere
+			_hit_sphere.material_override = MatCache.of(Color(1.0, 0.85, 0.55), true, 1.2, true, 0.42)
+			_hit_sphere.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(_hit_sphere)
+		if _hit_sphere != null:
+			_hit_sphere.visible = true
+			var t: float = 1.0 - hit_flash / 0.16
+			_hit_sphere.scale = Vector3.ONE * (1.25 - 0.55 * t)
+	elif _hit_sphere != null:
+		_hit_sphere.visible = false
 
 
 ## 炮口/激光发射口的世界坐标（机头前上方）
@@ -428,6 +448,7 @@ func draw_tracer(from: Vector3, to: Vector3) -> void:
 func take_damage(amount: float) -> void:
 	if not alive or amount <= 0.0:
 		return
+	hit_flash = 0.16
 	hp = maxf(0.0, hp - amount)
 	if hp <= 0.0:
 		alive = false

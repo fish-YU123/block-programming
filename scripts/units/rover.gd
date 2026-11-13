@@ -108,7 +108,7 @@ func setup(world_ref: Node3D, def: Dictionary) -> void:
 	can_sleep = false
 	continuous_cd = true
 	collision_layer = 4
-	collision_mask = 1 | 4
+	collision_mask = 1 | 2 | 4
 	_apply_physics_material()
 	_build_visual()
 	_badge = StatusBadges.make_sprite(self, Vector3(0.0, unit_size + 0.5, 0.0))
