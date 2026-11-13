@@ -1936,12 +1936,48 @@ func _produce_unit(node) -> void:
 
 ## 各队伍的预设代码：蓝方是"指挥官"AI（造建筑 + 滚雪球），红方是简单的战斗 AI
 func _preset_code_for(team: int) -> String:
+	# 支持按队伍给不同预设：commander_blue.py / commander_red.py，没有就退回 commander.py
+	var by_team := _preset_from_file("commander_blue" if team == TEAM_BLUE else "commander_red")
+	if by_team != "":
+		return by_team
+	var common := _preset_from_file("commander")
+	if common != "":
+		return common
 	return DefaultCode.COMMANDER_SOURCE
 
 
 ## 按单位类型选预设代码（工厂产出的单位也用这个）
+## 预设代码目录：每个单位一份 .py，改完不用动 GDScript
+const PRESET_DIR := "res://data/presets"
+## 读过的预设缓存：path -> {text, mtime}
+var _preset_cache: Dictionary = {}
+
+
+## 从本地文件读预设代码（文件不存在 / 读失败就回退到内置常量）
+func _preset_from_file(uid: String) -> String:
+	if uid == "":
+		return ""
+	var path := "%s/%s.py" % [PRESET_DIR, uid]
+	if not FileAccess.file_exists(path):
+		return ""
+	var mtime: int = FileAccess.get_modified_time(path)
+	var cached = _preset_cache.get(path, null)
+	if cached is Dictionary and int(cached.get("mtime", -1)) == mtime:
+		return str(cached.get("text", ""))
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return ""
+	var text := f.get_as_text()
+	_preset_cache[path] = {"text": text, "mtime": mtime}
+	return text
+
+
 func _preset_for_unit(def: Dictionary) -> String:
 	var uid := str(def.get("id", ""))
+	# 优先用 data/presets/<单位id>.py（玩家/开发者可以直接改文件）
+	var from_file := _preset_from_file(uid)
+	if from_file != "":
+		return from_file
 	if uid == "builder":
 		return DefaultCode.BUILDER_SOURCE
 	if uid == "scout":

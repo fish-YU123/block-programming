@@ -96,7 +96,7 @@ func _run() -> void:
 	_record("组装厂产出一台单位", after_units.size() == before + 1, "%d -> %d" % [before, after_units.size()])
 	var fresh: Dictionary = after_units[after_units.size() - 1]
 	_record("产出的确实是炮艇", str(fresh["unit"].unit_id) == "gunship", str(fresh["unit"].unit_id))
-	_record("新单位用的是炮艇预设代码", str(fresh["code"]) == str(_main.DefaultCode.GUNSHIP_SOURCE))
+	_record("新单位用的是炮艇预设代码", str(fresh["code"]) == _main._preset_for_unit(_main.unit_db.get_def("gunship")), "len=%d" % str(fresh["code"]).length())
 
 	# 单位代码里 produce("scout") 能改旁边厂的生产
 	var reader := """def start():
