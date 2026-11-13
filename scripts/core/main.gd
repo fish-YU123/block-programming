@@ -1365,6 +1365,7 @@ func _allies_for(self_unit: RigidBody3D, team: int) -> Array:
 		if o == self_unit or not o.alive:
 			continue
 		out.append({
+			"uid": int(other.get("uid", 0)),
 			"x": o.global_position.x,
 			"y": o.global_position.y,
 			"z": o.global_position.z,
