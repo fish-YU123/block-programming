@@ -144,7 +144,8 @@ func _process(delta: float) -> void:
 	if Input.is_key_pressed(KEY_SHIFT):
 		dir += Vector3.DOWN
 	var speed := move_speed
-	if Input.is_key_pressed(KEY_META):
+	# 加速：macOS 用 ⌘，Windows / Linux 用 Ctrl（Super 键也认，跟着平台习惯走）
+	if Input.is_key_pressed(KEY_META) or Input.is_key_pressed(KEY_CTRL):
 		speed *= fast_multiplier
 	if dir.length_squared() > 0.0:
 		position += dir.normalized() * speed * delta

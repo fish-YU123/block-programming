@@ -1,2 +1,6 @@
 # Normalize EOL for all files that Git considers text files.
 * text=auto eol=lf
+
+# cmd.exe 的批处理必须是 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf

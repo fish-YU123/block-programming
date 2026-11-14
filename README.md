@@ -45,21 +45,30 @@
 
 ## 运行
 
-**推荐：双击 `PlayGame.app`** —— 不开终端窗口，游戏退出后进程自己结束，不会留下终端窗口。
+需要 **Godot 4.7 或更新版本（标准版即可，不需要 .NET/Mono 版）**。仓库里不带引擎，启动脚本会自己去找，找不到再让你指定。
 
-也可以用 `play.command`（双击运行，游戏退出后会自动关掉那个终端窗口），或者命令行：
+| 平台 | 怎么开 | 说明 |
+| --- | --- | --- |
+| macOS | 双击 `PlayGame.app`，或双击 `play.command` | `PlayGame.app` 不弹终端（`Contents/MacOS/play` 只是一层壳，实际还是走 `play.sh`）；`play.command` 在游戏退出后自动关掉终端窗口 |
+| Linux | `./play.sh` | 任意带 `sh` 的发行版 |
+| Windows | 双击 `play.bat`（或 `powershell -File play.ps1`） | 批处理只是个壳，实际由 `play.ps1` 找引擎并启动 |
+
+三个启动脚本共用同一套查找顺序：环境变量 `GODOT` → PATH 里的 `godot` / `godot4` → 各平台常见安装路径（macOS 的 `/Applications/Godot.app`、Linux 的发行版包 / Snap / 便携版、Windows 的 `C:\Program Files\Godot`、Chocolatey、Scoop、版本化目录）。都找不到时会打印该怎么指定：
 
 ```sh
-/Users/boyu/Desktop/Godot.app/Contents/MacOS/Godot --path .
+GODOT=/path/to/godot ./play.sh              # macOS / Linux
+$env:GODOT = 'C:\Godot\Godot.exe'; .\play.bat   # Windows PowerShell
 ```
 
-首次启动可能黑屏 30~60 秒（Godot 在这台机器上编译着色器管线缓存，之后就快了）。
+启动参数原样透传，例如 `./play.sh -- --python`、`.\play.bat -- --world-seed=12345`。
+
+首次启动可能黑屏几十秒（Godot 在编译着色器管线缓存、生成导入资源），之后就快了；换机器或换显卡驱动后第一次也一样。
 
 开发提示：`shaders/` 里放着自定义着色器（如施工剖面 `construction.gdshader`）。
 
 **每局地形都是新的**（随机种子）；想复现某张图：`--path . -- --world-seed=12345`。
 
-操作：WASD 移动 / 空格上升 / Shift 下降 / ⌘ 加速 / 按住左键拖动转视角 / 单击左键标记挖掘 / 右键标记放置 / 数字键 1-8 选方块 / Q 切换建筑 / B 标记建造 / N 标记拆除 / 滚轮调视野 / C 代码面板（或双击本方单位）/ T 切换单位 / F 放置单位 / G 收回单位 / R 重开 / Tab 队伍面板 / P 切换厂房产物。
+操作：WASD 移动 / 空格上升 / Shift 下降 / Ctrl（macOS 上 ⌘）加速 / 按住左键拖动转视角 / 单击左键标记挖掘 / 右键标记放置 / 数字键 1-8 选方块 / Q 切换建筑 / B 标记建造 / N 标记拆除 / 滚轮调视野 / C 代码面板（或双击本方单位）/ T 切换单位 / F 放置单位 / G 收回单位 / R 重开 / Tab 队伍面板 / P 切换厂房产物。
 
 ## 本地 Python 模式（朋友局）
 
@@ -70,10 +79,21 @@
 ## 测试
 
 ```sh
-./run_tests.sh      # 24 套 headless 测试（VM/世界/单位/经济/建筑/战斗/联机…）
+./run_tests.sh              # macOS / Linux（Git Bash、MSYS2 下也能跑）
+./run_tests.sh lang world   # 只跑名字里含 lang / world 的
 ```
 
-截图脚本在 `tests/preview/`，每个脚本会在 `docs/` 下生成对应的预览图。
+```powershell
+.\run_tests.ps1             # Windows
+.\run_tests.ps1 lang world  # 同上，按名字过滤
+.\run_tests.ps1 -Seed 123   # 换地形种子（sh 版用 WORLD_SEED=123）
+```
+
+> Windows 默认执行策略会拦住 `.ps1`。`play.bat` 内部已经用 `-ExecutionPolicy Bypass` 调起 `play.ps1`；手动跑测试就写 `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1`。脚本存成带 BOM 的 UTF-8，PowerShell 5.1 才不会把中文读成乱码。
+
+两个脚本都会自动发现 `tests/*_test.gd`（现在 32 套：VM / 世界 / 单位 / 经济 / 建筑 / 战斗 / 联机 / 本地 Python 模式……），新增测试文件不用改脚本；跑完打印失败清单并以非 0 退出，方便接 CI。
+
+截图脚本在 `tests/preview/`：`./tests/preview/render_all.sh` 或 `./tests/preview/render_all.sh hud mp` 只重渲染一部分，会在 `docs/` 下生成对应预览图（需要能开窗口的显卡环境）。
 
 ## 预设代码（可改本地文件）
 
@@ -87,18 +107,19 @@
 
 - 想让某个单位用不同 AI：直接改对应 `.py`，**下一个部署/下线的单位就会用新代码**（按文件修改时间自动重载）
 - 指挥官支持按队伍分开写：放 `commander_blue.py` / `commander_red.py` 就会优先用它们（没有就退回 `commander.py`）
-- 文件不存在时自动回退到脚本里的内置常量，所以删文件也不会崩
+- 这些 `.py` 优先于 `scripts/units/presets/*.gd` 里的内置常量；文件不存在时自动回退到内置版本，所以删文件也不会崩
 
 ## 目录结构
 
 ```
-data/blocks/       方块定义（JSON，11 种）
-data/units/        单位定义（飞飞 / 车车）
-data/buildings/    建筑定义（采矿机 / 组装厂 / 充电站）
+data/blocks/       方块定义（JSON，12 种）
+data/units/        单位定义（JSON，12 种：飞飞 / 车车 / 炮艇 / 建筑工 …）
+data/buildings/    建筑定义（JSON，15 种：采矿机 / 组装厂 / 发电机 / 炮塔 …）
+data/presets/      每种单位的默认 AI 代码（*.py，改完下台单位即生效）
 scenes/main.tscn   主场景
 scripts/core/      游戏入口 main.gd、材质缓存
 scripts/world/     方块表、地形生成、体素世界（区块网格/碰撞/DDA 射线）、A* 寻路、程序化贴图
-scripts/units/     飞飞、车车、单位控制器（跑玩家代码+注入传感器）、预设代码（presets/）
+scripts/units/     飞飞、车车、单位控制器（跑玩家代码+注入传感器）、预设代码的内置回退（presets/）
 scripts/buildings/ 建筑实体与建筑表
 scripts/economy/   资源账本与生产
 scripts/net/       联机协议、快照、UDP 会话、主机端管理器
@@ -108,6 +129,7 @@ scripts/lang/      沙箱字节码 VM（词法/语法/编译/虚拟机）
 shaders/           施工剖面等自定义着色器
 tests/             headless 测试（*_test.gd）
 tests/preview/     截图脚本（生成 docs/ 里的预览图）
+tools/             辅助脚本：Godot 定位（godot_env.sh / .ps1）、本地 Python 桥 py_harness.py
 docs/              预览图与玩家/开发文档
 ```
 
@@ -124,15 +146,15 @@ docs/              预览图与玩家/开发文档
 
 ## 预设单位
 
-两台预设单位，玩家自己写代码指挥（T 键切换、F 放置、G 收回）。
+预设单位共 12 种（T 键切换、F 放置、G 收回），玩家自己写代码指挥。下面先细说最早的两台，其余 10 种见后面的表格。
 
 ### 飞飞（0.75 米立方飞行器）
 
 - 机身：底部一个可偏转的矢量喷口（升力 + 侧移），左右各一个 RCS 吊舱（前后两个喷口，负责平移和转向）
 - 机头：激光钻头，按控制指令每隔 0.25 秒朝正前方挖掉一个方块
-- 顶部：小雷达，输出自身周围 5×5 的地表、5×5×5 的方块、10 格内的敌方单位（坐标/类型/血量/距离）
-- 武器：`laser(x,y,z)` 8 格持续激光（对块 80/s、对单位 45/s）、`shoot(x,y,z)` 15 格炮击（对块 60、对单位 70，冷却 0.7 秒、每发 2400 焦耳）
-- 参数：12kg / 500kJ 电池 / 血量 90 / 升力 520N / RCS 60N / 喷口偏转 ±24° / 钻孔 1.5m、0.25s 一次
+- 顶部：小雷达，输出自身周围 5×5 的地表、5×5×5 的方块、22 格内最近的 8 个敌方单位（坐标/类型/血量/距离）
+- 武器：`laser(x,y,z)` 8 格持续激光（对块 80/s、对单位 10/s）、`shoot(x,y,z)` 15 格炮击（对块 60、对单位 18，冷却 0.95 秒、每发 1500 焦耳）
+- 参数：12kg / 1.2MJ 电池 / 血量 1000 / 升力 520N / RCS 60N / 喷口偏转 ±24° / 钻孔 1.5m、0.25s 一次
 - 造价：铜 18 + 煤 8
 - 方块有血量：草/泥土/沙 18、木板 36、石头 42、煤矿 60、铜矿 72、铁 96、金 108、基岩打不动
 
@@ -148,7 +170,7 @@ docs/              预览图与玩家/开发文档
 | 单位 | 造价 | 定位 |
 | --- | --- | --- |
 | 建筑工 builder | 铜 22 煤 6 | 唯一能用 `place(方块,x,y,z)` 改世界的单位 |
-| 侦察机 scout | 铜 14 煤 4 | 雷达 26 格、速度快、不打架 |
+| 侦察机 scout | 铜 14 煤 6 | 雷达 26 格、速度快、不打架 |
 | 货运飞飞 cargo | 铜 16 煤 6 | `transfer(True)` 把自身电量输给 8 格内友军 |
 | 炮艇 gunship | 铜 40 钢 12 | 22 格炮 + 8 格激光，正面推进 |
 | 自爆无人机 kamikaze | 铜 12 煤 4 | 贴近敌人自动爆炸（6 米 150 伤） |
@@ -163,6 +185,8 @@ docs/              预览图与玩家/开发文档
 完整说明见 `docs/战术范例.md`（可直接抄的兵种协同代码）与 `docs/单位编程手册.md` 与 `docs/飞飞快速上手.md`。
 
 ### 预设 AI
+
+运行时以 `data/presets/*.py` 为准（可热改）；下面这些 `.gd` 是文件缺失时的内置回退：
 
 - `scripts/units/presets/commander_preset.gd`：红蓝共用的「指挥官 AI」——发育期造矿机/组装厂/充电站，开战立刻带兵压上
 - `scripts/units/presets/fighter_preset.gd`：会挖矿、会缠斗的对战 AI
@@ -181,7 +205,7 @@ docs/              预览图与玩家/开发文档
 - `tests/sim_battle.gd`：headless 长时间对战模拟，每 5 秒打印双方单位数、建筑数、铜/钢、电量、和平倒计时，分胜负或超时退出。
   用法：`Godot --headless --path . --script res://tests/sim_battle.gd -- --world-seed=1 --max=240`
 - 左右半场地形与矿脉**镜像对称**（`terrain_gen.height_at` 内部把 x 折到左半场），保证 PvP 公平
-- 已调过的数值：飞飞 1000 血 / 1.0 MJ / 激光 10 /秒（对人）、炮 18 伤 0.95 秒、雷达视野 22 米；炮艇 1500 血 / 雷达 26 米；近战钻头 30/秒；发电站 360 电/3 秒；充电站耗电 18；炮塔 26 伤
+- 已调过的数值：飞飞 1000 血 / 1.2 MJ / 激光 10 /秒（对人）、炮 18 伤 0.95 秒、雷达视野 22 米；炮艇 1500 血 / 雷达 26 米；近战钻头 30/秒；发电站 360 电/3 秒；充电站耗电 18；炮塔 26 伤
 - 维修厂提前到第 4 栋建造；AI 只在「血量<35% 且家里有维修厂」时回血，决胜时刻（开打 180 秒后伤害逐渐放大）一律不撤退
 - 9 个随机种子的实测时长：2:30 / 4:29 / 3:08 / 4:45 / 4:17 / 5:10 / 2:50 / 5:28 / 4:05（8 局在 5:30 内分出胜负，胜率蓝红 4:5，接近平衡）
 

@@ -1,20 +1,18 @@
 #!/bin/sh
-# 双击 PlayGame.app 启动游戏；游戏退出后这个进程结束，不会留下终端窗口
+# 双击 PlayGame.app 启动游戏；游戏退出后程序自己结束，不会留下终端窗口。
+# 引擎查找走 tools/godot_env.sh；也支持在仓库根目录放一个 .godot_path 文件写引擎路径。
 APP_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
 KEY_FILE="$APP_DIR/.godot_path"
 
-if [ -n "$GODOT" ] && [ -x "$GODOT" ]; then
-	GODOT_BIN="$GODOT"
-elif [ -f "$KEY_FILE" ] && [ -x "$(cat "$KEY_FILE")" ]; then
-	GODOT_BIN="$(cat "$KEY_FILE")"
-elif [ -x "/Users/boyu/Desktop/Godot.app/Contents/MacOS/Godot" ]; then
-	GODOT_BIN="/Users/boyu/Desktop/Godot.app/Contents/MacOS/Godot"
-else
-	GODOT_BIN="$(command -v godot || command -v godot4)"
+if [ -z "$GODOT" ] && [ -f "$KEY_FILE" ]; then
+	FROM_FILE="$(cat "$KEY_FILE")"
+	[ -x "$FROM_FILE" ] && GODOT="$FROM_FILE"
 fi
 
-if [ -z "$GODOT_BIN" ]; then
-	osascript -e 'display alert "找不到 Godot" message "请把 Godot 放到 /Users/boyu/Desktop/Godot.app，或设置 GODOT 环境变量。"'
+if ! . "$APP_DIR/tools/godot_env.sh"; then
+	if command -v osascript >/dev/null 2>&1; then
+		osascript -e 'display alert "找不到 Godot" message "请安装 Godot 4.7，或用 export GODOT=/path/to/godot 指定引擎路径。"' >/dev/null 2>&1
+	fi
 	exit 1
 fi
 
@@ -28,4 +26,4 @@ for a in "$@"; do
 		*) FILTERED="$FILTERED \"$a\"" ;;
 	esac
 done
-eval "exec \"\$GODOT_BIN\" --path \"\$APP_DIR\" $FILTERED"
+eval "exec \"\$GODOT\" --path \"\$APP_DIR\" $FILTERED"
