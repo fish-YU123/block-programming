@@ -76,6 +76,25 @@ $env:GODOT = 'C:\Godot\Godot.exe'; .\play.bat   # Windows PowerShell
 可切到「本地 Python 模式」——代码跑在你自己电脑的 python3 里，能用完整 Python 语法和 pip 包，
 但**不沙箱**，也不参与正式对局。详见 [docs/本地Python模式.md](docs/本地Python模式.md)。
 
+## 不用 Godot 的渲染原型（`no-godot-vulkan` 分支）
+
+本分支在 `native/` 下放了一个**不依赖 Godot** 的渲染可行性原型：同一套 `RenderDevice` 接口，下挂两个后端，**Vulkan 优先、失败自动回退 OpenGL**，同一份 GLSL 双路编译（Vulkan 出 SPIR-V，OpenGL 直接编译源码）。
+
+| Vulkan 后端 | OpenGL 后端 |
+| --- | --- |
+| ![Vulkan](docs/preview-native-vulkan.png) | ![OpenGL](docs/preview-native-opengl.png) |
+
+```sh
+cd native && ./build.sh
+./build/block_programming_native.exe              # auto：先试 Vulkan
+./build/block_programming_native.exe --backend=gl # 强制 OpenGL
+./build/block_programming_native.exe --frames=30 --shot=out.bmp   # 截帧验证
+```
+
+在 32×32 体素列（6964 顶点 / 3482 三角形）上实测：Vulkan 约 34 fps（原型级同步，未优化），OpenGL 约 350 fps，画面一致。
+
+**方案到底行不行、要花多少人月、有没有更划算的路**，见 [docs/无Godot渲染方案.md](docs/无Godot渲染方案.md)——结论是：技术上成立（原型已跑通），但要替代 Godot 是 10～16 人月量级；如果目标只是"脱离 Godot"，基于 wgpu / bgfx / SDL3 GPU 的路线便宜一半。
+
 ## 测试
 
 ```sh
