@@ -60,7 +60,7 @@ GODOT=/path/to/godot ./play.sh              # macOS / Linux
 $env:GODOT = 'C:\Godot\Godot.exe'; .\play.bat   # Windows PowerShell
 ```
 
-启动参数原样透传，例如 `./play.sh -- --python`、`.\play.bat -- --world-seed=12345`。
+启动参数原样透传，例如 `./play.sh -- --world-seed=12345`、`.\play.bat -- --world-seed=12345`。
 
 首次启动可能黑屏几十秒（Godot 在编译着色器管线缓存、生成导入资源），之后就快了；换机器或换显卡驱动后第一次也一样。
 
@@ -70,11 +70,11 @@ $env:GODOT = 'C:\Godot\Godot.exe'; .\play.bat   # Windows PowerShell
 
 操作：WASD 移动 / 空格上升 / Shift 下降 / Ctrl（macOS 上 ⌘）加速 / 按住左键拖动转视角 / 单击左键标记挖掘 / 右键标记放置 / 数字键 1-8 选方块 / Q 切换建筑 / B 标记建造 / N 标记拆除 / 滚轮调视野 / C 代码面板（或双击本方单位）/ T 切换单位 / F 放置单位 / G 收回单位 / R 重开 / Tab 队伍面板 / P 切换厂房产物。
 
-## 本地 Python 模式（朋友局）
+## 代码引擎：只有内置 VM
 
-默认用内置沙箱 VM 跑单位代码；和朋友玩或单人调试时按 **F9**（或启动时加 `-- --python`）
-可切到「本地 Python 模式」——代码跑在你自己电脑的 python3 里，能用完整 Python 语法和 pip 包，
-但**不沙箱**，也不参与正式对局。详见 [docs/本地Python模式.md](docs/本地Python模式.md)。
+单位代码**只**跑在游戏自带的沙箱字节码 VM 里（纯 GDScript 实现，见 `scripts/lang/`）。游戏本身不依赖任何外部解释器：不用装 python3、不拉子进程、不联网，单机和联机走的是同一套执行引擎，行为完全一致。
+
+这条分支（`no-local-python`）去掉了早期的「本地 Python 模式」——那个模式会在玩家机器上起一个 python3 子进程跑完整 Python，代价是不沙箱、且需要本机装 Python。现在没有这个开关了，也没有 F9 切换和 `--python` 启动参数。
 
 ## 测试
 
@@ -91,7 +91,7 @@ $env:GODOT = 'C:\Godot\Godot.exe'; .\play.bat   # Windows PowerShell
 
 > Windows 默认执行策略会拦住 `.ps1`。`play.bat` 内部已经用 `-ExecutionPolicy Bypass` 调起 `play.ps1`；手动跑测试就写 `powershell -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1`。脚本存成带 BOM 的 UTF-8，PowerShell 5.1 才不会把中文读成乱码。
 
-两个脚本都会自动发现 `tests/*_test.gd`（现在 32 套：VM / 世界 / 单位 / 经济 / 建筑 / 战斗 / 联机 / 本地 Python 模式……），新增测试文件不用改脚本；跑完打印失败清单并以非 0 退出，方便接 CI。
+两个脚本都会自动发现 `tests/*_test.gd`（现在 31 套：VM / 世界 / 单位 / 经济 / 建筑 / 战斗 / 联机……），新增测试文件不用改脚本；跑完打印失败清单并以非 0 退出，方便接 CI。
 
 截图脚本在 `tests/preview/`：`./tests/preview/render_all.sh` 或 `./tests/preview/render_all.sh hud mp` 只重渲染一部分，会在 `docs/` 下生成对应预览图（需要能开窗口的显卡环境）。
 
@@ -129,7 +129,7 @@ scripts/lang/      沙箱字节码 VM（词法/语法/编译/虚拟机）
 shaders/           施工剖面等自定义着色器
 tests/             headless 测试（*_test.gd）
 tests/preview/     截图脚本（生成 docs/ 里的预览图）
-tools/             辅助脚本：Godot 定位（godot_env.sh / .ps1）、本地 Python 桥 py_harness.py
+tools/             辅助脚本：跨平台 Godot 定位（godot_env.sh / .ps1）
 docs/              预览图与玩家/开发文档
 ```
 

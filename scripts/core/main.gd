@@ -1,7 +1,6 @@
 extends Node3D
 ## 游戏入口：搭建世界、相机、HUD 与方块交互。
 
-const PyExecutor = preload("res://scripts/lang/py_executor.gd")
 const BlockDB = preload("res://scripts/world/block_db.gd")
 const VoxelWorld = preload("res://scripts/world/voxel_world.gd")
 const CameraRig = preload("res://scripts/player/camera_rig.gd")
@@ -81,10 +80,6 @@ const DRILL_DAMAGE_PER_SEC := 30.0
 const DRILL_UNIT_RANGE := 3.2
 ## 每项：{uid, unit, controller, code, revision, team, cost}
 var units: Array = []
-## 本地 Python 模式（朋友局）：玩家代码跑在自己机器的 python3 上
-var py: RefCounted = null
-var python_mode := false
-var _py_slot_next := 1
 ## 每队一块共享黑板（玩家代码里用 team_set / team_get 读写）
 var team_boards: Dictionary = {}
 ## 每队一份共享标点列表（玩家代码里用 mark 写，用 marks 读），30 秒自动过期
@@ -242,12 +237,6 @@ func _ready() -> void:
 	_refresh_hud()
 	_prewarm_visuals()
 	hud.set_loading_mode(true)
-	# 启动参数 --python：用玩家自己的 Python 跑代码（朋友局/开发用）
-	for arg in OS.get_cmdline_user_args():
-		if arg == "--python":
-			var py_err := _start_python_bridge()
-			if py_err != "":
-				push_warning("本地 Python 不可用：%s" % py_err)
 
 
 ## ---------------- 建筑血量 / 能源 / 炮塔 ----------------
@@ -932,78 +921,9 @@ func _spawn_unit(def: Dictionary, at: Vector3, code: String, team: int = TEAM_BL
 	unit.gun_fired.connect(_on_gun_fired)
 	unit.block_dug.connect(_on_block_dug)
 	controller.bind(unit, code, 1)
-	_attach_python_slot(controller, code)
 	units.append({"uid": _next_uid, "unit": unit, "controller": controller, "code": code, "revision": 1, "team": team, "cost": _economy_for(team).unit_cost(def) if economy != null else {}, "def": def})
 	_next_uid += 1
 	unit.name = "%s_%d" % [str(def.get("id", "unit")), int(units[units.size() - 1]["uid"])]
-
-
-## ---------- 本地 Python 模式（朋友局） ----------
-
-## 玩家机器上有 python3 时，代码可以跑在真的 Python 里（能用完整语法和第三方包）。
-## 这不是沙箱，只在朋友局/单机里用；联机正式对局仍然走内置 VM。
-func _start_python_bridge() -> String:
-	if py != null:
-		return ""
-	py = PyExecutor.new()
-	var err: String = py.start()
-	if err != "":
-		py = null
-		return err
-	python_mode = true
-	# 已经在场的单位立刻挂上 Python 槽位（F9 与新开局都走这里）
-	for entry in units:
-		var controller = entry.get("controller")
-		if controller != null:
-			controller.py_slot = -1
-			controller.py_tick = Callable()
-			_attach_python_slot(controller, str(entry.get("code", "")))
-	return ""
-
-
-func _stop_python_bridge() -> void:
-	if py != null:
-		py.stop()
-	py = null
-	python_mode = false
-	for entry in units:
-		var controller = entry.get("controller")
-		if controller != null:
-			controller.py_slot = -1
-			controller.py_tick = Callable()
-
-
-## 给一个控制器挂上 Python 槽位（会在 python 里加载同一份代码）
-func _attach_python_slot(controller, code: String) -> void:
-	if not python_mode or py == null:
-		return
-	var slot := _py_slot_next
-	_py_slot_next += 1
-	var err: String = py.load_source(slot, code)
-	if err != "":
-		hud.show_message("Python 代码编译失败，先退回 VM：%s" % err)
-		return
-	controller.py_slot = slot
-	controller.py_tick = Callable(self, "_py_tick")
-
-
-func _py_tick(slot: int, sensors: Dictionary, delta: float) -> Dictionary:
-	if py == null:
-		return {"ok": false, "error": "python 已关闭", "controls": {}, "logs": []}
-	return py.step(slot, sensors, delta)
-
-
-## F9：切换代码引擎（需要系统里有 python3）
-func _toggle_python_mode() -> void:
-	if python_mode:
-		_stop_python_bridge()
-		hud.show_message("代码引擎：内置 VM")
-		return
-	var err := _start_python_bridge()
-	if err != "":
-		hud.show_message("本地 Python 不可用：%s" % err)
-		return
-	hud.show_message("代码引擎：本地 Python（朋友局模式，不沙箱）")
 
 
 ## 在自己附近找一块平地盖建筑（给单位代码的 build_here 用）
@@ -1135,11 +1055,8 @@ func _on_code_applied(uid: int, code: String) -> void:
 	entry["revision"] = int(entry["revision"]) + 1
 	var controller: UnitController = entry["controller"]
 	controller.bind(entry["unit"], code, int(entry["revision"]))
-	controller.py_slot = -1
-	controller.py_tick = Callable()
-	_attach_python_slot(controller, code)
 	code_panel.show_error(controller.last_error())
-	code_panel.show_status("已应用（版本 %d）%s" % [int(entry["revision"]), "  引擎：Python" if python_mode and controller.py_slot >= 0 else ""])
+	code_panel.show_status("已应用（版本 %d）" % int(entry["revision"]))
 
 
 ## 重新运行：丢弃当前运行状态、从头再跑一遍（mem 也会清空）
@@ -1150,9 +1067,6 @@ func _on_code_rerun(uid: int) -> void:
 	entry["revision"] = int(entry["revision"]) + 1
 	var controller: UnitController = entry["controller"]
 	controller.bind(entry["unit"], str(entry["code"]), int(entry["revision"]))
-	controller.py_slot = -1
-	controller.py_tick = Callable()
-	_attach_python_slot(controller, str(entry["code"]))
 	code_panel.show_status("已重新运行（版本 %d）" % int(entry["revision"]))
 	code_panel.show_error(controller.last_error())
 	code_panel.show_logs([])
@@ -2675,12 +2589,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			hud.show_message("取消标记")
 
 
-func _exit_tree() -> void:
-	if py != null:
-		py.stop()
-		py = null
-
-
 func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
@@ -2692,9 +2600,6 @@ func _input(event: InputEvent) -> void:
 		return
 	if event.keycode == KEY_P:
 		_cycle_building_production()
-		return
-	if event.keycode == KEY_F9:
-		_toggle_python_mode()
 		return
 	if event.keycode == KEY_TAB:
 		if hud != null:
