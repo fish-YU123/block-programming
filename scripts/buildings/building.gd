@@ -26,7 +26,8 @@ var build_left := 0.0    ## 还剩多少秒建完（>0 表示还在施工）
 var world = null
 
 ## 施工时把整个楼换成半透明青色"轮廓"，建完再换回队伍材质
-var _saved_materials: Dictionary = {}
+## 建好时的"原始材质"快照：只采集一次，之后所有外观（施工/罢工/正常）都从它推导
+var _base_materials: Dictionary = {}
 var _construction := false
 var _unsupported := false
 var _blocked := false
@@ -541,21 +542,37 @@ func is_stalled() -> bool:
 	return _stalled
 
 
-## 罢工外观：整楼偏红发暗；恢复时按「施工中 / 正常」重新套用正确外观
-func _apply_strike_look(on: bool) -> void:
-	if on:
-		_construction = false
-		var tint: StandardMaterial3D = MatCache.of(Color(0.9, 0.25, 0.2), true, 0.5, false, 0.85)
-		for m in _all_meshes():
-			_saved_materials[m] = m.material_override
-			m.material_override = tint
-		return
-	for m in _saved_materials.keys():
+## 统一外观刷新：罢工(红) > 施工(青色剖面) > 原始外观
+## 之所以要统一：以前施工和罢工各自维护一份 _saved_materials，
+## 施工中被判"被埋/缺地基"会把青色幽灵材质当成"原始材质"存下来，
+## 建完以后就永远停在半透明青色（看着像没建完，其实已经在生产）。
+func _refresh_visuals() -> void:
+	_capture_base_materials()
+	var tint: Material = null
+	if _blocked or _unsupported or _stalled:
+		tint = MatCache.of(Color(0.9, 0.25, 0.2), true, 0.5, false, 0.85)
+	elif _construction:
+		if _construction_mat == null:
+			_construction_mat = ShaderMaterial.new()
+			_construction_mat.shader = ConstructionShader
+		_construction_mat.set_shader_parameter("tint", Color(0.42, 0.84, 1.0, 1.0))
+		_construction_mat.set_shader_parameter("alpha", 0.5)
+		tint = _construction_mat
+	for m in _base_materials.keys():
 		if is_instance_valid(m):
-			m.material_override = _saved_materials[m]
-	_saved_materials.clear()
-	_construction = false
-	_update_build_progress()
+			m.material_override = _base_materials[m] if tint == null else tint
+
+
+func _capture_base_materials() -> void:
+	if not _base_materials.is_empty():
+		return
+	for m in _all_meshes():
+		_base_materials[m] = m.material_override
+
+
+## 兼容旧调用点：参数只是"想不想变红"，真正的状态由 _blocked/_unsupported/_stalled 决定
+func _apply_strike_look(_on: bool) -> void:
+	_refresh_visuals()
 
 
 ## 施工中的样子：半透明青色 + 从下往上的剖面切割 + 切口发光
@@ -563,20 +580,7 @@ func _set_construction_look(on: bool) -> void:
 	if on == _construction:
 		return
 	_construction = on
-	if on:
-		if _construction_mat == null:
-			_construction_mat = ShaderMaterial.new()
-			_construction_mat.shader = ConstructionShader
-		_construction_mat.set_shader_parameter("tint", Color(0.42, 0.84, 1.0, 1.0))
-		_construction_mat.set_shader_parameter("alpha", 0.5)
-		for m in _all_meshes():
-			_saved_materials[m] = m.material_override
-			m.material_override = _construction_mat
-	else:
-		for m in _saved_materials.keys():
-			if is_instance_valid(m):
-				m.material_override = _saved_materials[m]
-		_saved_materials.clear()
+	_refresh_visuals()
 
 
 ## 地基缺失时的样子：整楼偏红发暗，提醒"这里罢工了"

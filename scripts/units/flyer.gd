@@ -83,6 +83,12 @@ var _flame: MeshInstance3D
 var _radar_dome: MeshInstance3D
 var _rcs_jets: Array = []
 var _anim_time := 0.0
+## 卡住检测：想走却几乎没速度时，给一段临时抬升助力（翻过山坡/方块）
+var _stuck_time := 0.0
+var _climb_boost := 0.0
+## 硬兜底：长时间想动却完全不离位，就直接挪一下（防止被单位/建筑/地形夹死后永久卡住）
+var _immobile_time := 0.0
+var _immobile_anchor := Vector3.ZERO
 var hit_flash := 0.0
 var _hit_sphere: MeshInstance3D = null
 var _gun_kick := 0.0
@@ -147,7 +153,7 @@ func setup(world_node: Node3D, def: Dictionary) -> void:
 	continuous_cd = true
 	contact_monitor = false
 	collision_layer = 2
-	collision_mask = 1 | 2 | 4  # 也要和别的单位撞，不能互相穿模
+	collision_mask = 1 | 4  # 地形 + 建筑；单位之间用软排斥，避免互相别死
 	_build_visual()
 	_badge = StatusBadges.make_sprite(self, Vector3(0.0, unit_size + 0.45, 0.0))
 
@@ -231,10 +237,54 @@ func _lift_for(target_y: float) -> float:
 func _command_control() -> void:
 	if has_goal:
 		return  # 自动驾驶优先
+	var cmd_speed := 0.0
 	if bool(controls.get("vel_mode", false)):
-		_steer_toward(Vector3(float(controls.get("vx", 0.0)), 0.0, float(controls.get("vz", 0.0))))
+		var vx := float(controls.get("vx", 0.0))
+		var vz := float(controls.get("vz", 0.0))
+		cmd_speed = sqrt(vx * vx + vz * vz)
+		_steer_toward(Vector3(vx, 0.0, vz))
 	if bool(controls.get("alt_mode", false)):
-		controls["lift"] = _lift_for(float(controls.get("alt_target", global_position.y)))
+		var target_y := float(controls.get("alt_target", global_position.y))
+		# 1) 不许钻地：目标高度至少高过脚下地形 3 米
+		if world != null:
+			var gx := int(floor(global_position.x))
+			var gz := int(floor(global_position.z))
+			target_y = maxf(target_y, float(world.surface_height(gx, gz)) + 3.0)
+		# 2) 被山壁/方块顶住时自动抬升，别原地怼墙
+		_climb_boost = maxf(0.0, _climb_boost - get_physics_process_delta_time())
+		if _climb_boost > 0.0:
+			target_y = maxf(target_y, global_position.y + 3.0)
+		controls["lift"] = _lift_for(target_y)
+		# 3) 卡住检测：想走但几乎没速度，就给它一段"抬升 + 前冲"的助力
+		var horiz := Vector2(linear_velocity.x, linear_velocity.z).length()
+		# 硬兜底：4 秒内位移不到 1.5 米，直接往上/往前挪 2 米
+		if cmd_speed > 1.5:
+			if _immobile_anchor == Vector3.ZERO:
+				_immobile_anchor = global_position
+			if global_position.distance_to(_immobile_anchor) > 1.5:
+				_immobile_anchor = global_position
+				_immobile_time = 0.0
+			else:
+				_immobile_time += get_physics_process_delta_time()
+				if _immobile_time > 4.0:
+					_immobile_time = 0.0
+					var dir := Vector3(float(controls.get("vx", 0.0)), 0.0, float(controls.get("vz", 0.0))).normalized()
+					global_position += dir * 2.0 + Vector3(0.0, 2.5, 0.0)
+					_immobile_anchor = global_position
+		else:
+			_immobile_anchor = global_position
+			_immobile_time = 0.0
+		if cmd_speed > 1.5 and horiz < 0.9:
+			_stuck_time += get_physics_process_delta_time()
+			if _stuck_time > 0.45:
+				_stuck_time = 0.0
+				_climb_boost = 1.2
+				# 再给一个"向上 + 随机侧向"的初速度，防止被卡在方块缝/建筑墙角/其他单位之间
+				linear_velocity.y = maxf(linear_velocity.y, 3.2)
+				linear_velocity.x += randf_range(-2.5, 2.5)
+				linear_velocity.z += randf_range(-2.5, 2.5)
+		else:
+			_stuck_time = 0.0
 
 
 func _physics_process(delta: float) -> void:

@@ -1168,11 +1168,71 @@ func build_near(def_id: String, near: Vector3, team: int) -> String:
 				if not flat:
 					continue
 				var cell := Vector3i(x, top, z)
+				if _site_blocked_by_unit(cell, size):
+					continue  # 别把正在干活的单位砌进墙里
 				var err := place_building_at(def_id, cell, team)
 				if err == "":
 					return ""
 				# 位置被占就继续往远处找
 	return "附近找不到平地"
+
+## 建筑工地上有没有活着的单位挡着（AI 自动建造时避开，免得把自己/队友关进墙里）
+func _site_blocked_by_unit(cell: Vector3i, size: Vector3i) -> bool:
+	for entry in units:
+		var u = entry.get("unit")
+		if u == null or not is_instance_valid(u) or not bool(u.alive):
+			continue
+		var p: Vector3 = u.global_position
+		if p.y < float(cell.y) - 1.5 or p.y > float(cell.y + size.y) + 2.0:
+			continue
+		if p.x > float(cell.x) - 1.5 and p.x < float(cell.x + size.x) + 1.5 \
+				and p.z > float(cell.z) - 1.5 and p.z < float(cell.z + size.z) + 1.5:
+			return true
+	return false
+
+
+## 单位之间用软排斥代替硬碰撞：靠太近就互相推开，既不穿模也不会互相别死
+func _separate_units(delta: float) -> void:
+	var count := units.size()
+	if count < 2:
+		return
+	for i in count:
+		var a = units[i].get("unit")
+		if a == null or not is_instance_valid(a) or not bool(a.alive):
+			continue
+		for j in range(i + 1, count):
+			var b = units[j].get("unit")
+			if b == null or not is_instance_valid(b) or not bool(b.alive):
+				continue
+			var pa: Vector3 = a.global_position
+			var pb: Vector3 = b.global_position
+			var need: float = maxf(0.75, float(a.unit_size) * 0.5 + float(b.unit_size) * 0.5) * 1.2
+			var d := pa - pb
+			d.y *= 0.5
+			var dist := d.length()
+			if dist >= need or dist < 0.001:
+				continue
+			var push := d.normalized() * (need - dist) * 8.0
+			a.global_position += push * delta * 6.0
+			b.global_position -= push * delta * 6.0
+
+
+## 把不小心被建筑包住的单位顶出来（防止永久卡死）
+func _unstick_units_from_buildings() -> void:
+	for entry in units:
+		var u = entry.get("unit")
+		if u == null or not is_instance_valid(u) or not bool(u.alive):
+			continue
+		var p: Vector3 = u.global_position
+		var cell := Vector3i(floori(p.x), floori(p.y), floori(p.z))
+		for b in buildings:
+			var node = b.get("node")
+			if node == null or not is_instance_valid(node):
+				continue
+			if node.occupies(cell):
+				u.global_position.y = float(node.base_cell.y + node.size.y) + 1.5
+				break
+
 
 ## 取某支队伍的资源账（红方也是独立的一套）
 func _economy_for(team: int):
@@ -1433,6 +1493,8 @@ func _physics_process(delta: float) -> void:
 	_prof("combat", _t1)
 	_t1 = Time.get_ticks_usec()
 	_flush_damage()
+	_separate_units(delta)
+	_unstick_units_from_buildings()
 	_purge_dead()
 	_check_victory()
 	_prof("cleanup", _t1)
