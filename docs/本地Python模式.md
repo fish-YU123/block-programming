@@ -26,13 +26,31 @@ HUD 的代码面板底部会显示「引擎：Python」或「引擎：VM」。
 本地 Python 模式下，游戏注入的 API 与 VM 一致（`set_lift` / `set_velocity` / `drill` / `laser` …），
 传感器同样是全局变量（`pos` / `vel` / `enemies` / `orders` …）。
 
-目前**本地模式还不支持**这几个接口，调用会抛 `NotImplementedError`：
+**建造 / 协同 / 寻路也都能用**了 —— 这些调用会通过「Python 桥」同步回调游戏本体（`tools/py_harness.py` 与游戏之间一行一个 JSON 的 RPC），语义和 VM 版完全一致：
 
-- `place()` 放方块、`build()` / `build_here()` 造建筑、`produce()` 改厂房产线
-- `mark()` / `team_set()` / `team_get()` / `command()` 队伍协同
-- `find_path()` 会返回空数组（不走 A*）
+| 接口 | 作用 |
+| --- | --- |
+| `team_set(键, 值)` / `team_get(键, 默认值)` | 读写**全队共享黑板**（同队所有单位都能看到） |
+| `mark(x, y, z, 标签)` | 给全队标一个点（30 秒过期，同一位置会自动合并） |
+| `command(uid, 动作, x, y, z)` | 直接指挥队友：`"goto"` / `"attack"` / `"hold"`（12 秒有效） |
+| `place(方块名, x, y, z)` | 放方块（耗电、非自然方块扣 1 铜） |
+| `build(建筑id, x, y, z)` / `build_here(建筑id)` | 在指定格 / 在附近找平地盖建筑 |
+| `produce(单位id)` | 把附近的厂房改成生产某种单位 |
+| `find_path(x, y, z)` | 返回 A* 航路 `[{x,y,z}, …]`，拿不到就空数组 |
+| `get_link(i)` | 固定返回空数组（这套单位没有拼装部件） |
 
-也就是说：**飞控制、开火、挖矿、传感器**全都能用，**建造/协同**暂时只有 VM 支持。
+例：一台 Python 模式的侦察机可以把敌情广播给全队，再指挥炮艇去打：
+
+```python
+def loop():
+    if len(enemies) > 0:
+        敌 = enemies[0]
+        team_set("敌情", [敌.x, 敌.y, 敌.z])
+        mark(敌.x, 敌.y, 敌.z, "敌人")
+        for 友 in allies:
+            if 友.type == "gunship":
+                command(友.uid, "attack", 敌.x, 敌.y, 敌.z)
+```
 
 ## 两种引擎的差别
 

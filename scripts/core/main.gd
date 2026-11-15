@@ -87,6 +87,8 @@ var units: Array = []
 var py: RefCounted = null
 var python_mode := false
 var _py_slot_next := 1
+## slot -> controller，用于把 Python 侧的协同/建造调用还原成「哪台单位在调」
+var _py_controllers: Dictionary = {}
 ## 每队一块共享黑板（玩家代码里用 team_set / team_get 读写）
 var team_boards: Dictionary = {}
 ## 每队一份共享标点列表（玩家代码里用 mark 写，用 marks 读），30 秒自动过期
@@ -1000,6 +1002,7 @@ func _start_python_bridge() -> String:
 		py = null
 		return err
 	python_mode = true
+	py.rpc_handler = Callable(self, "_py_rpc")
 	# 已经在场的单位立刻挂上 Python 槽位（F9 与新开局都走这里）
 	for entry in units:
 		var controller = entry.get("controller")
@@ -1015,6 +1018,7 @@ func _stop_python_bridge() -> void:
 		py.stop()
 	py = null
 	python_mode = false
+	_py_controllers.clear()
 	for entry in units:
 		var controller = entry.get("controller")
 		if controller != null:
@@ -1034,6 +1038,90 @@ func _attach_python_slot(controller, code: String) -> void:
 		return
 	controller.py_slot = slot
 	controller.py_tick = Callable(self, "_py_tick")
+	_py_controllers[slot] = controller
+
+
+func _py_rpc(slot: int, name: String, args: Array) -> Dictionary:
+	var controller = _py_controllers.get(slot)
+	if controller == null:
+		return {"ok": false, "error": "这个槽位没有对应单位"}
+	var unit = controller.get("unit")
+	if unit == null or not is_instance_valid(unit):
+		return {"ok": false, "error": "单位已不存在"}
+	var team: int = int(unit.get("team"))
+	match name:
+		"team_set":
+			if args.size() < 2:
+				return {"ok": false, "error": "team_set(键, 值)"}
+			if not team_boards.has(team):
+				team_boards[team] = {}
+			team_boards[team][str(args[0])] = args[1]
+			return {"ok": true, "value": args[1]}
+		"team_get":
+			if args.is_empty():
+				return {"ok": false, "error": "team_get(键, 默认值)"}
+			var board: Dictionary = team_boards.get(team, {})
+			var fallback = args[1] if args.size() > 1 else null
+			return {"ok": true, "value": board.get(str(args[0]), fallback)}
+		"mark":
+			if args.size() < 3:
+				return {"ok": false, "error": "mark(x, y, z, 标签)"}
+			var tag := str(args[3]) if args.size() > 3 else ""
+			var mx := float(args[0])
+			var my := float(args[1])
+			var mz := float(args[2])
+			var marks: Array = _marks_for(team)
+			var merged := false
+			for old in marks:
+				if absf(float(old.get("x", 0.0)) - mx) + absf(float(old.get("y", 0.0)) - my) + absf(float(old.get("z", 0.0)) - mz) < 1.0:
+					old["t"] = 0.0
+					old["tag"] = tag
+					merged = true
+					break
+			if not merged:
+				marks.append({"x": mx, "y": my, "z": mz, "tag": tag, "t": 0.0})
+			return {"ok": true, "value": true}
+		"command":
+			if args.size() < 2:
+				return {"ok": false, "error": "command(uid, 动作, x, y, z)"}
+			var action := str(args[1])
+			var unit_pos: Vector3 = (unit as Node3D).global_position
+			var cx: float = float(args[2]) if args.size() > 2 else unit_pos.x
+			var cy: float = float(args[3]) if args.size() > 3 else unit_pos.y
+			var cz: float = float(args[4]) if args.size() > 4 else unit_pos.z
+			var err_cmd := issue_command(team, int(args[0]), action, cx, cy, cz)
+			return {"ok": err_cmd == "", "value": err_cmd, "error": err_cmd}
+		"place":
+			if args.size() < 4:
+				return {"ok": false, "error": "place(方块名, x, y, z)"}
+			var err_place := place_block_for(unit, str(args[0]), Vector3i(int(args[1]), int(args[2]), int(args[3])))
+			return {"ok": err_place == "", "value": err_place, "error": err_place}
+		"build":
+			if args.size() < 4:
+				return {"ok": false, "error": "build(建筑id, x, y, z)"}
+			var err_build := place_building_at(str(args[0]), Vector3i(int(args[1]), int(args[2]), int(args[3])), team)
+			return {"ok": err_build == "", "value": err_build, "error": err_build}
+		"build_here":
+			if args.is_empty():
+				return {"ok": false, "error": "build_here(建筑id)"}
+			var err_here := build_near(str(args[0]), unit.global_position, team)
+			return {"ok": err_here == "", "value": err_here, "error": err_here}
+		"produce":
+			if args.is_empty():
+				return {"ok": false, "error": "produce(单位id)"}
+			var err_prod := switch_production_near(str(args[0]), unit.global_position, team)
+			return {"ok": err_prod == "", "value": err_prod, "error": err_prod}
+		"find_path":
+			if args.size() < 3:
+				return {"ok": false, "error": "find_path(x, y, z)"}
+			var raw: Array = unit.find_path_to(Vector3(float(args[0]), float(args[1]), float(args[2])))
+			var out: Array = []
+			for point in raw:
+				out.append({"x": float(point.x), "y": float(point.y), "z": float(point.z)})
+			return {"ok": true, "value": out}
+		"get_link":
+			return {"ok": true, "value": []}
+	return {"ok": false, "error": "不支持的回调 %s()" % name}
 
 
 func _py_tick(slot: int, sensors: Dictionary, delta: float) -> Dictionary:

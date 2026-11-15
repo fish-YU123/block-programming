@@ -74,7 +74,9 @@ $env:GODOT = 'C:\Godot\Godot.exe'; .\play.bat   # Windows PowerShell
 
 默认用内置沙箱 VM 跑单位代码；和朋友玩或单人调试时按 **F9**（或启动时加 `-- --python`）
 可切到「本地 Python 模式」——代码跑在你自己电脑的 python3 里，能用完整 Python 语法和 pip 包，
-但**不沙箱**，也不参与正式对局。详见 [docs/本地Python模式.md](docs/本地Python模式.md)。
+且**建造 / 协同 / A* 寻路也都能用**（通过 Python 桥同步回调游戏：`team_set` / `mark` / `command` /
+`place` / `build_here` / `produce` / `find_path`）。但**不沙箱**，也不参与正式对局。
+详见 [docs/本地Python模式.md](docs/本地Python模式.md)。
 
 ## 多人协作
 

@@ -6,6 +6,8 @@
         {"cmd": "step", "slot": 1, "dt": 0.016, "sensors": {...}}
         {"cmd": "quit"}
   响应  {"ok": true, ...}
+  回调  {"cmd": "rpc", "name": "mark", "args": [...]}（Python 代码里调用协同/建造 API 时发出，
+        游戏立刻回一行 {"cmd": "rpc_result", "ok": true, "value": ...}）
 玩家代码跑在自己的 Python 里（朋友局模式），所以这里不做沙箱，
 只做"每帧调用一次 loop()"的宿主，外加行数上限防止死循环卡死游戏。
 """
@@ -42,7 +44,8 @@ def _wrap(value):
 
 
 class Slot:
-    def __init__(self, src):
+    def __init__(self, src, owner=None):
+        self.owner = owner
         self.controls = {}
         self.logs = []
         self.env = {}
@@ -107,15 +110,19 @@ class Slot:
         def transfer(on=True):
             c["transfer"] = bool(on)
 
-        def _missing(name):
-            def fn(*_a, **_k):
-                raise NotImplementedError("本地 Python 模式暂不支持 %s()" % name)
+        def _bridge(name):
+            def fn(*args, **_k):
+                if self.owner is None:
+                    raise RuntimeError("桥接未连接，无法调用 %s()" % name)
+                return _wrap(self.owner.rpc(name, list(args)))
+            fn.__name__ = name
             return fn
 
+        # 协同 / 建造 / 寻路：通过 RPC 回调游戏本体（与 VM 版语义一致）
         for name in ("place", "build", "build_here", "produce", "mark",
-                     "team_set", "team_get", "command", "get_link"):
-            env[name] = _missing(name)
-        env["find_path"] = lambda x, y, z: []
+                     "team_set", "team_get", "command", "find_path"):
+            env[name] = _bridge(name)
+        env["get_link"] = lambda _i: []
         env.update({
             "set_lift": set_lift, "set_tilt": set_tilt, "set_rcs": set_rcs,
             "drill": drill, "laser": laser, "laser_off": laser_off,
@@ -154,10 +161,35 @@ class Slot:
             self.error = "%s: %s" % (type(e).__name__, e)
 
 
+class Conn:
+    """一行一个 JSON 的双向连接；step 期间允许嵌套 RPC。"""
+
+    def __init__(self, f):
+        self.f = f
+
+    def send(self, obj):
+        self.f.write(json.dumps(obj) + "\n")
+        self.f.flush()
+
+    def recv(self):
+        line = self.f.readline()
+        if not line:
+            raise RuntimeError("游戏端断开了连接")
+        return json.loads(line)
+
+    def rpc(self, name, args):
+        self.send({"cmd": "rpc", "name": name, "args": args})
+        reply = self.recv()
+        if not reply.get("ok", False):
+            raise RuntimeError(reply.get("error", "%s() 调用失败" % name))
+        return reply.get("value")
+
+
 def main():
     port = int(sys.argv[sys.argv.index("--port") + 1])
     s = socket.create_connection(("127.0.0.1", port), timeout=10)
     f = s.makefile("rw", encoding="utf-8", newline="\n")
+    conn = Conn(f)
     slots = {}
     for line in f:
         try:
@@ -169,7 +201,7 @@ def main():
             break
         if cmd == "load":
             slot = int(req["slot"])
-            slots[slot] = Slot(req.get("src", ""))
+            slots[slot] = Slot(req.get("src", ""), conn)
             f.write(json.dumps({"ok": not slots[slot].error,
                                 "error": slots[slot].error}) + "\n")
             f.flush()

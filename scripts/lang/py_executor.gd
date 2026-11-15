@@ -12,6 +12,10 @@ var last_error := ""
 
 var _rx := ""
 
+## 游戏侧回调：func(slot: int, name: String, args: Array) -> Dictionary
+## 返回 {"ok": bool, "value": Variant, "error": String}
+var rpc_handler: Callable = Callable()
+
 
 ## 找一个可用的 python3（找不到返回空串）
 static func python_path() -> String:
@@ -85,10 +89,39 @@ func load_source(slot: int, src: String) -> String:
 func step(slot: int, sensors: Dictionary, delta: float) -> Dictionary:
 	if not is_ready():
 		return {"ok": false, "error": "python 未连接", "controls": {}, "logs": []}
-	var reply := _exchange({"cmd": "step", "slot": slot, "dt": delta, "sensors": sensors})
-	if reply.is_empty():
-		return {"ok": false, "error": "python 无响应", "controls": {}, "logs": []}
-	return reply
+	_send_line({"cmd": "step", "slot": slot, "dt": delta, "sensors": sensors})
+	# 玩家代码在 step 里可能调用协同/建造 API（握手式 RPC），这里要一边等结果一边应答
+	var deadline: int = Time.get_ticks_msec() + 2000
+	while Time.get_ticks_msec() < deadline:
+		var line := _read_line(deadline)
+		if line.is_empty():
+			break
+		match str(line.get("cmd", "")):
+			"rpc":
+				_handle_rpc(slot, line)
+			"step_result":
+				return line
+			_:
+				# 兼容旧协议：没有 cmd 字段的回复就当结果
+				if line.has("controls") or line.has("ok"):
+					return line
+	last_error = "python 响应超时"
+	return {"ok": false, "error": last_error, "controls": {}, "logs": []}
+
+
+func _handle_rpc(slot: int, line: Dictionary) -> void:
+	var name := str(line.get("name", ""))
+	var args: Array = line.get("args", [])
+	if not rpc_handler.is_valid():
+		_send_line({"cmd": "rpc_result", "ok": false, "error": "游戏侧没有提供 %s()" % name})
+		return
+	var reply: Dictionary = rpc_handler.call(slot, name, args)
+	_send_line({
+		"cmd": "rpc_result",
+		"ok": bool(reply.get("ok", false)),
+		"value": reply.get("value", null),
+		"error": str(reply.get("error", "")),
+	})
 
 
 func stop() -> void:
@@ -114,8 +147,13 @@ func _send_line(payload: Dictionary) -> void:
 
 func _exchange(payload: Dictionary) -> Dictionary:
 	_send_line(payload)
-	var deadline: int = Time.get_ticks_msec() + 120
+	return _read_line(Time.get_ticks_msec() + 4000)
+
+
+func _read_line(deadline: int) -> Dictionary:
 	while Time.get_ticks_msec() < deadline:
+		if peer == null:
+			return {}
 		peer.poll()
 		if peer.get_status() != StreamPeerTCP.STATUS_CONNECTED:
 			last_error = "python 断开了"
@@ -126,14 +164,15 @@ func _exchange(payload: Dictionary) -> Dictionary:
 			if int(chunk[0]) != OK:
 				return {}
 			_rx += (chunk[1] as PackedByteArray).get_string_from_utf8()
-			var cut := _rx.find("\n")
-			if cut >= 0:
+			while true:
+				var cut := _rx.find("\n")
+				if cut < 0:
+					break
 				var line := _rx.substr(0, cut)
 				_rx = _rx.substr(cut + 1)
 				var parsed = JSON.parse_string(line)
 				if parsed is Dictionary:
 					return parsed
-				return {}
 		OS.delay_msec(1)
 	last_error = "python 响应超时"
 	return {}

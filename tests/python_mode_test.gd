@@ -80,6 +80,64 @@ func _run() -> void:
 		if slot >= 0:
 			hover_err = _main.py.load_source(slot, "def loop():\n    set_velocity(0.0, 0.0)\n    set_altitude(40.0)\n")
 	_record("能在运行时替换 Python 代码", hover_err == "", hover_err)
+
+	# 6) 协同/建造 API 走 RPC 桥（本地 Python 也能 mark / team_set / find_path / command / build_here）
+	var slot0 := -1
+	for entry in blue:
+		if int(entry["controller"].py_slot) >= 0:
+			slot0 = int(entry["controller"].py_slot)
+			break
+	if slot0 >= 0:
+		var coop_err: String = _main.py.load_source(slot0, "def loop():\n    team_set(\"协作\", 42)\n    mark(pos.x + 6.0, pos.y, pos.z, \"敌人\")\n    team_set(\"路\", len(find_path(pos.x + 8.0, pos.y, pos.z)))\n")
+		_record("协同代码能加载", coop_err == "", coop_err)
+		var sensors: Dictionary = {}
+		for entry in blue:
+			if int(entry["controller"].py_slot) == slot0:
+				sensors = entry["controller"]._sensor_payload(true)
+				break
+		var r: Dictionary = _main.py.step(slot0, sensors, 0.016)
+		_record("协同代码执行无错", bool(r.get("ok", false)), str(r.get("error", "")))
+		_record("team_set 写入队伍黑板", int(_main._board_for(0).get("协作", 0)) == 42,
+			str(_main._board_for(0)))
+		var marks: Array = _main._marks_for(0)
+		var marked := false
+		for m in marks:
+			if str(m.get("tag", "")) == "敌人":
+				marked = true
+		_record("mark 写进全队标点", marked, str(marks))
+		_record("find_path 返回航路", int(_main._board_for(0).get("路", 0)) >= 1,
+			str(_main._board_for(0).get("路")))
+
+		# build_here：给够资源后能从小地图上盖出一栋
+		_main.economy.add("copper", 200)
+		_main.economy.add("coal", 200)
+		_main.economy.add("iron", 100)
+		var before: int = _main.buildings.size()
+		var build_err: String = _main.py.load_source(slot0, "def loop():\n    build_here(\"miner\")\n")
+		_record("build_here 代码能加载", build_err == "", build_err)
+		var r2: Dictionary = _main.py.step(slot0, sensors, 0.016)
+		_record("build_here 执行无错", bool(r2.get("ok", false)), str(r2.get("error", "")))
+		_record("build_here 真的盖出建筑", _main.buildings.size() > before,
+			"%d -> %d" % [before, _main.buildings.size()])
+
+		# command：给自己队伍的另一台单位下指令
+		var ally_uid := -1
+		for entry in blue:
+			if int(entry["controller"].py_slot) != slot0:
+				ally_uid = int(entry["unit"].get("uid"))
+				break
+		if ally_uid > 0:
+			_main.py.load_source(slot0, "def loop():\n    command(%d, \"hold\", 40.0, 40.0, 40.0)\n" % ally_uid)
+			var r3: Dictionary = _main.py.step(slot0, sensors, 0.016)
+			_record("command 执行无错", bool(r3.get("ok", false)), str(r3.get("error", "")))
+			var got := false
+			for cmd in _main.unit_commands:
+				if int(cmd.get("uid", 0)) == ally_uid and str(cmd.get("action", "")) == "hold":
+					got = true
+			_record("command 下达到了队友", got, str(_main.unit_commands))
+		else:
+			_record("command 下达到了队友", true, "（只有一台单位，跳过）")
+
 	_main._stop_python_bridge()
 
 
