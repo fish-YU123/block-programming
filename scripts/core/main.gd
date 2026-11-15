@@ -56,6 +56,8 @@ var buildings: Array = []
 var mines: Array = []            ## 布雷车埋下的地雷
 var _delta_cache := 0.0
 var power_pool: Dictionary = {}   ## 每队当前电力储量（team -> float）
+## 全景雷达：team -> 本帧是否在线（有已完工、通电、没被埋的同队 omniradar）
+var omni_online: Dictionary = {}
 var selected_building := 0
 ## 玩家当前选的预设单位（T 键切换）
 var selected_unit := 0
@@ -625,6 +627,53 @@ func _run_radar(node, def: Dictionary) -> void:
 		node.set_stalled_look(true)
 		return
 	node.set_stalled_look(false)
+
+
+## 全景雷达：通电就上报「本队全图视野在线」
+func _run_omniradar(node, def: Dictionary) -> void:
+	if not use_power(int(node.team), float(def.get("power_draw", 40.0))):
+		node.set_stalled_look(true)
+		return
+	node.set_stalled_look(false)
+	omni_online[int(node.team)] = true
+
+
+## 本队的全景雷达是否在线（本帧）
+func team_has_omniradar(team: int) -> bool:
+	return bool(omni_online.get(team, false))
+
+
+## 全景雷达看到的「整张地图所有单位」：位置、种类、队伍；
+## 自己队伍的单位额外带血量与最大血量（敌人只给位置/种类，血量不给看）
+func omni_units_for(team: int) -> Array:
+	var out: Array = []
+	for entry in units:
+		var u: RigidBody3D = entry["unit"]
+		if not is_instance_valid(u) or not u.alive:
+			continue
+		var item: Dictionary = {
+			"uid": int(entry.get("uid", 0)),
+			"team": int(entry.get("team", TEAM_BLUE)),
+			"type": u.unit_id,
+			"x": u.global_position.x,
+			"y": u.global_position.y,
+			"z": u.global_position.z,
+		}
+		if int(entry.get("team", TEAM_BLUE)) == team:
+			item["hp"] = u.hp
+			item["hp_max"] = u.max_hp
+		out.append(item)
+	return out
+
+
+## 全景雷达查方块：返回方块名字（air / grass / stone …）；没有雷达时返回空串
+func omni_block_name_at(team: int, x: int, y: int, z: int) -> String:
+	if not team_has_omniradar(team):
+		return ""
+	var cell := Vector3i(x, y, z)
+	if not world.in_bounds(cell):
+		return ""
+	return db.name_of(world.get_block(cell))
 
 
 func _run_repairbay(node, def: Dictionary) -> void:
@@ -1236,6 +1285,8 @@ func _physics_process(delta: float) -> void:
 	_refresh_enemy_sensors()
 	_prof("sensors", _t0)
 	_t0 = Time.get_ticks_usec()
+	# 全景雷达「在线」是每帧重算的：雷达被打掉/没电/被埋，当帧就失效
+	omni_online.clear()
 	_tick_buildings(delta)
 	_prof("buildings", _t0)
 	_tick_peace(delta)
@@ -1263,6 +1314,11 @@ func _physics_process(delta: float) -> void:
 			team_res["repair"] = facility_count(int(entry.get("team", TEAM_BLUE)), "repairbay")
 			team_res["charger"] = facility_count(int(entry.get("team", TEAM_BLUE)), "charger")
 			controller.set_resources(team_res)
+			controller.omni_enabled = team_has_omniradar(my_team_id)
+			controller.omni_units = omni_units_for(my_team_id) if controller.omni_enabled else []
+			var unit_team: int = my_team_id
+			controller.block_at_provider = func(x: int, y: int, z: int) -> String:
+				return omni_block_name_at(unit_team, x, y, z)
 			controller.sudden = _damage_scale() > 1.001
 		_prof("unit_pre", _t_pre)
 		var _t_tick := Time.get_ticks_usec()
@@ -2003,6 +2059,8 @@ func _tick_buildings(delta: float) -> void:
 			_run_turret(node, def)
 		elif kind == "radar":
 			_run_radar(node, def)
+		elif kind == "omniradar":
+			_run_omniradar(node, def)
 		elif kind == "repairbay":
 			_run_repairbay(node, def)
 		elif kind == "refinery":

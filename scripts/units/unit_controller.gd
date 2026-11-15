@@ -43,6 +43,11 @@ var resources: Dictionary = {}
 var sudden := false
 ## 是不是队伍里的"指挥官"（只有它会主动盖建筑，避免每个单位都乱花资源）
 var is_leader := false
+## 全景雷达（team_has_omniradar 为真时才为 true）：能看到整张地图的方块与所有单位
+var omni_enabled := false
+var omni_units: Array = []
+## block_at(x,y,z) 的提供者（由 main 注入，已带全景雷达校验）
+var block_at_provider: Callable = Callable()
 
 ## 本地 Python 模式（朋友局）：main 注入 py_tick，槽位由 main 分配
 var py_tick: Callable = Callable()
@@ -306,6 +311,10 @@ func _apply_idle_controls() -> void:
 func _wire_path_provider() -> void:
 	_vm.path_provider = func(target: Vector3) -> Array:
 		return unit.find_path_to(target)
+	_vm.block_at_provider = func(x: int, y: int, z: int) -> String:
+		if block_at_provider.is_valid():
+			return str(block_at_provider.call(x, y, z))
+		return "没有雷达接口"
 	_vm.build_provider = func(def_id: String, cell: Vector3i) -> String:
 		if build_provider.is_valid():
 			return str(build_provider.call(def_id, cell))
@@ -390,6 +399,8 @@ func _sensor_payload(refresh_lists: bool) -> Dictionary:
 			"submerged": 1 if bool(unit.get("submerged")) else 0,
 			"ore": _nearest_ore(blocks3, s["cell"]),
 			"below": _first_solid_below(unit, s["pos"]),
+			# 全景雷达在线时才有内容，否则空数组
+			"units": omni_units.duplicate(true) if omni_enabled else [],
 		}
 	return {
 		"pos": s["pos"],
@@ -418,6 +429,7 @@ func _sensor_payload(refresh_lists: bool) -> Dictionary:
 		"submerged": _list_snapshot.get("submerged", 0),
 		"ore": _list_snapshot.get("ore", {}),
 		"below": _list_snapshot.get("below", {}),
+		"units": _list_snapshot.get("units", []),
 		"moving": unit.moving,
 		"peace": peace_left,
 		"uid": int(unit.get("uid")) if unit != null else 0,

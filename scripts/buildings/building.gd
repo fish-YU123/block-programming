@@ -328,6 +328,39 @@ func _build_visual() -> void:
 		dish.rotation.x = -0.5
 		add_child(dish)
 		_core = dish
+	elif kind == "omniradar":
+		# 全景雷达：大抛物面天线 + 三道旋转扫描环（比普通雷达站大一圈）
+		var base := MeshInstance3D.new()
+		var base_mesh := CylinderMesh.new()
+		base_mesh.top_radius = sx * 0.28
+		base_mesh.bottom_radius = sx * 0.36
+		base_mesh.height = sy * 0.5
+		base.mesh = base_mesh
+		base.material_override = frame_mat
+		base.position = Vector3(0.0, sy * 0.32, 0.0)
+		add_child(base)
+		var dish := MeshInstance3D.new()
+		var dish_mesh := SphereMesh.new()
+		dish_mesh.radius = sx * 0.42
+		dish_mesh.height = sx * 0.5
+		dish.mesh = dish_mesh
+		dish.material_override = glow_mat
+		dish.position = Vector3(0.0, sy * 0.9, 0.0)
+		dish.rotation.x = -0.6
+		add_child(dish)
+		_core = dish
+		for i in range(3):
+			var ring := MeshInstance3D.new()
+			var ring_mesh := TorusMesh.new()
+			ring_mesh.inner_radius = sx * (0.3 + 0.07 * i)
+			ring_mesh.outer_radius = ring_mesh.inner_radius + 0.06
+			ring.mesh = ring_mesh
+			ring.material_override = MatCache.of(team_glow, false, 0.9)
+			ring.position = Vector3(0.0, sy * 0.9 + 0.12 * i, 0.0)
+			ring.rotation.x = PI * 0.5
+			add_child(ring)
+			if _ring == null:
+				_ring = ring
 	elif kind == "repairbay":
 		# 维修厂：顶上一个发光的十字
 		var bar_a := MeshInstance3D.new()

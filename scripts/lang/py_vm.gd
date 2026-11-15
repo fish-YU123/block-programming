@@ -17,7 +17,7 @@ const BUILTINS := [
 	"print", "set_drive", "set_spin", "set_steer", "set_thrust", "get_link",
 	"set_lift", "set_tilt", "set_rcs", "drill", "laser", "laser_off", "shoot", "go_to", "stop", "find_path", "set_velocity", "set_altitude",
 	"build", "build_here", "place", "transfer",
-	"team_set", "team_get", "mark", "command", "produce",
+	"team_set", "team_get", "mark", "command", "produce", "block_at",
 	"range", "len", "abs", "min", "max", "int", "float", "str", "round", "bool",
 ]
 
@@ -36,6 +36,8 @@ var state: Dictionary = {"drive": 0.0, "spin": {}, "steer": {}, "thrust": {}, "m
 var path_provider: Callable = Callable()
 ## 建筑：build(id, x, y, z) 与 build_here(id)，返回错误字符串（空串表示成功）
 var build_provider: Callable = Callable()
+## block_at(x, y, z)：全景雷达提供的「查整张地图某格是什么方块」
+var block_at_provider: Callable = Callable()
 var build_here_provider: Callable = Callable()
 var place_provider: Callable = Callable()
 ## 协同：队伍共享黑板与标点
@@ -1007,6 +1009,14 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			if produce_provider.is_valid():
 				produce_err = str(produce_provider.call(str(args[0])))
 			stack.append(produce_err)
+			return true
+		"block_at":
+			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
+				return _fail("TypeError", "block_at(x, y, z)：查这个格子是什么方块（需要自家的全景雷达在线）", op, ins)
+			var block_name := ""
+			if block_at_provider.is_valid():
+				block_name = str(block_at_provider.call(int(args[0]), int(args[1]), int(args[2])))
+			stack.append(block_name)
 			return true
 		"command":
 			if args.size() < 2 or not _is_num(args[0]) or not _is_str(args[1]):

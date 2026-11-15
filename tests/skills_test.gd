@@ -80,7 +80,7 @@ func _run() -> void:
 	_record("12 种单位的预设都能编译", preset_bad.is_empty(), str(preset_bad))
 
 	_record("单位表 12 种", _main.unit_db.order.size() == 12, str(_main.unit_db.order.size()))
-	_record("建筑表 15 种", _main.building_db.order.size() == 15, str(_main.building_db.order.size()))
+	_record("建筑表 16 种", _main.building_db.order.size() == 16, str(_main.building_db.order.size()))
 
 	var red = _main.team_units(1)[0]["unit"]
 	var blue = _main.team_units(0)[0]["unit"]

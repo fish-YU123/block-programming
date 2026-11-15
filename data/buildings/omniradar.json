@@ -1,0 +1,14 @@
+{
+  "id": "omniradar",
+  "name": "omniradar",
+  "display_name": "全景雷达",
+  "kind": "omniradar",
+  "build_seconds": 10.0,
+  "size": [3, 3, 3],
+  "cost": { "copper": 60, "iron": 30, "steel": 10 },
+  "hp": 240,
+  "period": 1.0,
+  "power_draw": 40,
+  "radar_global": true,
+  "color": [0.42, 0.86, 0.98]
+}
