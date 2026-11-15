@@ -1089,7 +1089,7 @@ func _sync_input_state() -> void:
 	rig.input_enabled = not _code_typing()
 
 
-func _toggle_code_panel(force_open: bool = false) -> void:
+func _toggle_code_panel(force_open: bool = false, preview: bool = false) -> void:
 	if code_panel == null:
 		return
 	if code_panel.is_open() and not force_open:
@@ -1118,7 +1118,7 @@ func _toggle_code_panel(force_open: bool = false) -> void:
 	if not items.is_empty():
 		var first_uid: int = int(items[0]["uid"])
 		code_panel.set_code(first_uid, _code_of(first_uid))
-	code_panel.open()
+	code_panel.open(preview)
 
 
 func _on_code_applied(uid: int, code: String) -> void:
@@ -2646,8 +2646,10 @@ func _on_unit_clicked(entry: Dictionary) -> void:
 
 
 ## 直接打开某台单位的代码面板（会顺带把面板切到该单位）
+## 双击单位：打开面板但只是「预览」——不抢键盘焦点，WASD/挖放照常可用；
+## 想改代码就点一下代码框（和按 C 打开后点别处再点回来的效果一致）
 func _open_code_for(uid: int) -> void:
-	_toggle_code_panel(true)
+	_toggle_code_panel(true, true)
 	code_panel.set_current(uid)
 	code_panel.set_code(uid, _code_of(uid))
 	code_panel.set_current(uid)

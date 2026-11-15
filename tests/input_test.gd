@@ -103,6 +103,21 @@ func _process(_delta: float) -> bool:
 	_record("输入禁用时不转视角", is_equal_approx(_rig.yaw, yaw1), "yaw %.3f → %.3f" % [yaw1, _rig.yaw])
 	_rig.input_enabled = true
 
+	# 7) 卡在拖动状态时，禁用输入会立刻结束拖动（点代码框导致松手事件被 UI 吃掉的情况）
+	_rig._pressing = true
+	_rig.dragging = true
+	_rig.input_enabled = false
+	_rig._process(0.016)
+	_record("输入被禁用时自动结束拖动", not _rig._pressing and not _rig.dragging, "仍卡在拖动")
+	_rig.input_enabled = true
+
+	# 8) 兜底：每帧核对左键，没按着就结束拖动（防止视角一直自己转）
+	_rig._pressing = true
+	_rig.dragging = true
+	_rig._process(0.016)
+	_record("左键已松开时自动结束拖动", not _rig._pressing, "仍卡在拖动")
+	_rig.dragging = false
+
 	print("通过 %d 项，失败 %d 项" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)
 	return false

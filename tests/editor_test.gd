@@ -90,6 +90,10 @@ func _check() -> void:
 	var target_uid: int = int(mine[mine.size() - 1]["uid"])
 	_main._open_code_for(target_uid)
 	_record("双击单位会打开面板", panel.is_open(), "没打开")
+	# 双击是「预览」：不抢键盘焦点，WASD/挖放照常可用
+	_main._sync_input_state()
+	_record("双击单位默认是预览（代码框不抢焦点）", not panel.editor_has_focus(), "代码框被自动聚焦了")
+	_record("预览状态下仍能操作角色", _main.rig.input_enabled, "相机被锁住")
 	_record("面板定位到被点的单位", panel.current_uid() == target_uid, "%d vs %d" % [panel.current_uid(), target_uid])
 	_record("编辑器里是该单位的代码", panel.editor.text == str(mine[mine.size() - 1]["code"]), "代码不一致")
 	panel.close()

@@ -82,14 +82,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				if _blank_cursor != null:
 					Input.set_custom_mouse_cursor(_blank_cursor, Input.CURSOR_ARROW)
 			elif _pressing:
-				_pressing = false
-				Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
-				if not dragging:
-					primary_click.emit(_saved_mouse)
-				else:
-					# 转完视角把鼠标送回按下时的位置
-					Input.warp_mouse(_saved_mouse)
-				dragging = false
+				# 正常松手：单击发 primary_click，拖动则把鼠标送回原位
+				_end_drag(true)
 		return
 	if event is InputEventMouseMotion and _pressing:
 		# 鼠标每帧被传回按下点，所以用"相对锁定点的偏移"算增量：
@@ -127,8 +121,15 @@ func _process(delta: float) -> void:
 		# Minecraft 式：每帧把鼠标传回按下点，位置保持不变
 		_last_offset = Vector2.ZERO
 		Input.warp_mouse(_lock_pos)
+	# 拖动中把输入关了（比如点了代码框）：立刻结束拖动，避免"松手事件被 UI 吃掉"后卡在拖动状态
 	if not input_enabled:
+		if _pressing:
+			_end_drag(false)
 		return
+	# 兜底：每帧核对左键是否真的按着。GUI（代码框/面板）会吃掉鼠标抬起事件，
+	# 一旦 _pressing 卡住，视角就会自己一直转
+	if _pressing and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		_end_drag(true)
 	var dir := Vector3.ZERO
 	var basis := Basis.from_euler(Vector3(0.0, yaw, 0.0))
 	if Input.is_key_pressed(KEY_W):
@@ -149,6 +150,19 @@ func _process(delta: float) -> void:
 		speed *= fast_multiplier
 	if dir.length_squared() > 0.0:
 		position += dir.normalized() * speed * delta
+
+
+## 结束拖动：restore_mouse 为真时把鼠标送回按下点（正常松手的情况）
+func _end_drag(restore_mouse: bool) -> void:
+	if not _pressing:
+		return
+	_pressing = false
+	Input.set_custom_mouse_cursor(null, Input.CURSOR_ARROW)
+	if restore_mouse and dragging:
+		Input.warp_mouse(_saved_mouse)
+	if not dragging and restore_mouse:
+		primary_click.emit(_saved_mouse)
+	dragging = false
 
 
 func _notification(what: int) -> void:

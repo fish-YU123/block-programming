@@ -43,9 +43,13 @@ func toggle() -> void:
 		open()
 
 
-func open() -> void:
+## preview = true：只把代码显示出来、不抢键盘焦点（双击单位时用这种「预览」）
+func open(preview := false) -> void:
 	visible = true
-	editor.grab_focus()
+	if preview:
+		editor.release_focus()
+	else:
+		editor.grab_focus()
 
 
 func close() -> void:
