@@ -5,6 +5,7 @@ extends RefCounted
 ## 零外部素材，全部用 BoxMesh / CylinderMesh / SphereMesh / TorusMesh / PrismMesh 拼。
 
 const MatCache = preload("res://scripts/core/mat_cache.gd")
+const ModelAssets = preload("res://scripts/art/model_assets.gd")
 
 
 static func is_custom(unit_id: String) -> bool:
@@ -12,6 +13,10 @@ static func is_custom(unit_id: String) -> bool:
 
 
 static func build(unit_id: String, team: int) -> Node3D:
+	# 有 res://assets/models/units/<id>.glb 就用资产，没有就往下走程序化造型
+	var asset_model: Node3D = ModelAssets.instantiate_unit(unit_id, 0.75, team)
+	if asset_model != null:
+		return asset_model
 	var model := Node3D.new()
 	model.name = "Model"
 	var body_color := Color(0.16, 0.28, 0.62) if team == 0 else Color(0.62, 0.15, 0.14)

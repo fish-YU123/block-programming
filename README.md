@@ -135,11 +135,13 @@ $env:GODOT = 'C:\Godot\Godot.exe'; .\play.bat   # Windows PowerShell
 ## 目录结构
 
 ```
+assets/models/     美术资产（.glb，按 id 命名，有就用、没有回退程序化模型，见 docs/美术资产接入.md）
 data/blocks/       方块定义（JSON，12 种）
 data/units/        单位定义（JSON，12 种：飞飞 / 车车 / 炮艇 / 建筑工 …）
 data/buildings/    建筑定义（JSON，15 种：采矿机 / 组装厂 / 发电机 / 炮塔 …）
 data/presets/      每种单位的默认 AI 代码（*.py，改完下台单位即生效）
 scenes/main.tscn   主场景
+scripts/art/       美术资产接入（.glb 加载、自动缩放对齐、队伍染色）
 scripts/core/      游戏入口 main.gd、材质缓存
 scripts/world/     方块表、地形生成、体素世界（区块网格/碰撞/DDA 射线）、A* 寻路、程序化贴图
 scripts/units/     飞飞、车车、单位控制器（跑玩家代码+注入传感器）、预设代码的内置回退（presets/）
@@ -259,6 +261,7 @@ docs/              预览图与玩家/开发文档
 ![状态图标](docs/preview-badges.png)
 ![能源网与新建筑](docs/preview-power.png)
 ![建筑工/侦察机/雷达站/维修厂](docs/preview-new-units.png)
+![统一画风](docs/preview-art-style.png)
 
 ## 联机（M6 第一版）
 

@@ -5,6 +5,7 @@ extends RigidBody3D
 
 const BlockDB = preload("res://scripts/world/block_db.gd")
 const MatCache = preload("res://scripts/core/mat_cache.gd")
+const ModelAssets = preload("res://scripts/art/model_assets.gd")
 const UnitModels = preload("res://scripts/units/unit_models.gd")
 const StatusBadges = preload("res://scripts/ui/status_badges.gd")
 
@@ -618,9 +619,31 @@ func block_here() -> String:
 
 # ---------------------------------------------------------------- 外观
 
+## 在美术资产里按名字递归找动画部件（Flame/Radar/Barrel）；找不到返回 null，
+## 动画代码本来就有判空，所以美术资产可以省略这些部件。
+func _find_part(root: Node3D, part_name: String) -> MeshInstance3D:
+	return root.find_child(part_name, true, false) as MeshInstance3D
+
+
 func _build_visual() -> void:
 	# 所有尺寸以 0.75 米立方体为单位，k 按实际 unit_size 缩放
 	var k := unit_size / 0.75
+	# 有 .glb 资产就直接用资产（自动缩放到 0.75 基准、按队伍染色），没有就走程序化造型
+	var asset_model: Node3D = ModelAssets.instantiate_unit(unit_id, 0.75, team)
+	if asset_model != null:
+		asset_model.scale = asset_model.scale * Vector3(k, k, k)
+		add_child(asset_model)
+		# 动画部件按名字找（美术资产里命名 Flame / Radar / Barrel 就能继续动）
+		_flame = _find_part(asset_model, "Flame")
+		_radar_dome = _find_part(asset_model, "Radar")
+		_barrel = _find_part(asset_model, "Barrel")
+		_rcs_jets = []
+		var asset_shape := CollisionShape3D.new()
+		var asset_box := BoxShape3D.new()
+		asset_box.size = Vector3(0.72, 0.4, 0.76) * k
+		asset_shape.shape = asset_box
+		add_child(asset_shape)
+		return
 	# 机身配色按队伍区分：蓝方=深蓝 + 青色识别条，红方=赤红 + 橙色识别条
 	var body_color := Color(0.16, 0.28, 0.62) if team == 0 else Color(0.62, 0.15, 0.14)
 	var trim_color := Color(0.28, 0.85, 0.95) if team == 0 else Color(0.98, 0.62, 0.18)

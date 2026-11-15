@@ -6,6 +6,7 @@ extends RigidBody3D
 
 const BlockDB = preload("res://scripts/world/block_db.gd")
 const MatCache = preload("res://scripts/core/mat_cache.gd")
+const ModelAssets = preload("res://scripts/art/model_assets.gd")
 const StatusBadges = preload("res://scripts/ui/status_badges.gd")
 const PathFinder = preload("res://scripts/world/path_finder.gd")
 
@@ -379,6 +380,26 @@ func forward_dir() -> Vector3:
 
 func _build_visual() -> void:
 	var k := unit_size / 1.2
+	# 有 .glb 资产就直接用资产（自动缩放、按队伍染色），没有就走程序化造型
+	var asset_model: Node3D = ModelAssets.instantiate_unit(unit_id, 1.2, team)
+	if asset_model != null:
+		asset_model.scale = asset_model.scale * Vector3(k, k, k)
+		add_child(asset_model)
+		# 车底贴近地面：让包围盒最低点落在轮底高度（程序化模型的轮底约 -0.38 个基准单位）
+		asset_model.position.y += -0.3 * k - ModelAssets.model_aabb(asset_model).position.y
+		# 资产里的轮子按固定名字接上（美术约定 Wheel_1..4），没有就不转
+		_wheels = []
+		for wheel_name in ["Wheel_1", "Wheel_2", "Wheel_3", "Wheel_4"]:
+			var wheel := asset_model.find_child(wheel_name, true, false)
+			if wheel is Node3D:
+				_wheels.append(wheel)
+		var asset_shape := CollisionShape3D.new()
+		var asset_box := BoxShape3D.new()
+		asset_box.size = Vector3(1.1, 0.6, 1.5) * k
+		asset_shape.shape = asset_box
+		asset_shape.position.y = 0.05
+		add_child(asset_shape)
+		return
 	if unit_id == "minelayer":
 		_build_minelayer_visual(k)
 		return

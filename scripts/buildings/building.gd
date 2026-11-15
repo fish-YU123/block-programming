@@ -1,5 +1,6 @@
 extends Node3D
 const MatCache = preload("res://scripts/core/mat_cache.gd")
+const ModelAssets = preload("res://scripts/art/model_assets.gd")
 const ConstructionShader = preload("res://shaders/construction.gdshader")
 const StatusBadges = preload("res://scripts/ui/status_badges.gd")
 ## 一栋建筑：一个占方格的方块体，带队伍颜色和碰撞体。
@@ -84,6 +85,29 @@ func hp_ratio() -> float:
 	return clampf(hp / maxf(max_hp, 0.001), 0.0, 1.0)
 
 
+## 美术资产的动效部件按固定名字接上（找不到就跳过，动画代码本来就有判空）
+func _bind_asset_parts(asset_model: Node3D) -> void:
+	var drill := asset_model.find_child("Drill", true, false)
+	if drill is MeshInstance3D:
+		_drill_bit = drill
+	var crane := asset_model.find_child("Crane", true, false)
+	if crane is Node3D:
+		_crane = crane
+	var ring := asset_model.find_child("Ring", true, false)
+	if ring is MeshInstance3D:
+		_ring = ring
+	var core := asset_model.find_child("Core", true, false)
+	if core is MeshInstance3D:
+		_core = core
+	var dish := asset_model.find_child("Dish", true, false)
+	if dish is MeshInstance3D and _core == null:
+		_core = dish
+	var smoke := asset_model.find_child("Smoke", true, false)
+	if smoke is Node3D:
+		# 烟雾锚点要换算到建筑本地空间（资产外面还套了一层缩放/对齐的 wrapper）
+		_smoke_anchor = global_transform.affine_inverse() * (smoke as Node3D).global_position
+
+
 func _build_visual() -> void:
 	# 队伍色：蓝方深蓝、红方赤红；建筑本体的细节用深浅两色分层
 	var team_main := Color(0.22, 0.38, 0.78) if team == 0 else Color(0.72, 0.2, 0.18)
@@ -96,6 +120,14 @@ func _build_visual() -> void:
 	var sx := float(size.x)
 	var sy := float(size.y)
 	var sz := float(size.z)
+
+	# 有 res://assets/models/buildings/<id>.glb 就用资产（自动缩放到占地、底面贴地、按队伍染色），
+	# 没有就继续下面的程序化造型
+	var asset_model: Node3D = ModelAssets.instantiate_building(str(def.get("id", kind)), Vector3(sx, sy, sz), team)
+	if asset_model != null:
+		add_child(asset_model)
+		_bind_asset_parts(asset_model)
+		return
 
 	# 底座：一圈略宽的深色地基，让建筑"坐"在地上，不会像浮着的盒子
 	var plinth := MeshInstance3D.new()

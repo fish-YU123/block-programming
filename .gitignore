@@ -3,3 +3,6 @@
 /android/
 *.uid
 .godot_path
+
+# 测试临时资产目录（tests/model_assets_test.gd 会自己生成并清理）
+.test_art/
