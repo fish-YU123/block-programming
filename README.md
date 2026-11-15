@@ -76,6 +76,14 @@ $env:GODOT = 'C:\Godot\Godot.exe'; .\play.bat   # Windows PowerShell
 可切到「本地 Python 模式」——代码跑在你自己电脑的 python3 里，能用完整 Python 语法和 pip 包，
 但**不沙箱**，也不参与正式对局。详见 [docs/本地Python模式.md](docs/本地Python模式.md)。
 
+## 多人协作
+
+这个仓库有两个人一起写，规则很简单：
+
+- **开工前先 `./tools/sync.sh`**（= `git pull --rebase origin main`，有本地改动会先 stash）
+- 只想看差多少：`./tools/sync.sh --check`
+- 提交前 `./run_tests.sh` 全绿再推；冲突了优先保 `main` 上的测试完整性
+
 ## 测试
 
 ```sh
