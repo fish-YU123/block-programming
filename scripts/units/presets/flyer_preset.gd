@@ -1,75 +1,196 @@
 extends RefCounted
-## 飞飞：默认行为 的预设玩家代码（纯字符串，给代码面板 / 新单位用）
+## 飞飞（僚机 v2）的预设玩家代码（纯字符串）。
+## 运行时会优先读 data/presets/feifei.py；这份只是文件缺失时的兜底，内容与文件保持一致。
 
-const SOURCE := """# 飞飞：默认行为（自己的手写控制，寻路用 find_path 拿航路）
-# 改下面这几个数就能让它去别的地方
-目标x = 44
-目标y = 0      # 0 表示"自动用地表高度 + 6 米"
-目标z = 128
-速度 = 6
-
-# 传感器：pos vel cell yaw energy thrust moving blocks[5][5] blocks3[5][5][5] heights[5][5] here enemies orders
-# 可用：find_path(x,y,z) 返回航路列表；go_to(x,y,z) 一行版自动驾驶
-#       set_velocity(水平x速度, 水平z速度) set_altitude(高度) —— 每帧自动闭环，不会抖
-#       set_lift(0~1) set_tilt(前后, 左右) set_rcs(转向, 前后)
-#       drill(True) laser(x,y,z) laser_off() shoot(x,y,z)
+const SOURCE := """# 飞飞（僚机 v2）：报点 + 集火 + 风筝走位 + 能自保
+# 传感器：pos vel hp hp_ratio energy_ratio enemies marks orders cmd allies team_mem res
+#        peace t water submerged blocks3 heights below
+# 控制：set_velocity set_altitude set_lift set_tilt set_rcs drill laser laser_off shoot
+# 协同：mark team_set team_get command place build_here produce find_path
 
 def start():
-    print("飞飞启动，地面高度 ", heights[2][2])
+    mem["上次报点"] = -99.0
+    mem["上次转向"] = 0.0
+    mem["走位方向"] = 1
+    mem["逃逸到"] = 0.0
+    mem["状态"] = "待命"
+    mem["待命方向"] = 1
+    print("飞飞就位：", heights[2][2])
+
+def 回家():
+    if team == 0:
+        家x = 34.0
+    else:
+        家x = 221.0
+    return 家x
+
+def 找目标():
+    最好 = enemies[0]
+    最少血 = 最好.hp
+    for 每个 in enemies:
+        if 每个.dist < 22.0 and 每个.hp < 最少血:
+            最好 = 每个
+            最少血 = 每个.hp
+    return 最好
+
+def 贴到(目标x, 目标z, 速度, 高度):
+    set_velocity(max(-速度, min(速度, (目标x - pos.x) * 1.1)),
+                 max(-速度, min(速度, (目标z - pos.z) * 1.1)))
+    set_altitude(高度)
+
+def 报点(敌):
+    mark(敌.x, 敌.y, 敌.z, "敌人")
+    team_set("敌情", 1)
+    team_set("敌情x", 敌.x)
+    team_set("敌情z", 敌.z)
+    mem["上次报点"] = t
 
 def loop():
-    # 队友下的指令优先
-    if len(cmd) > 0:
-        if cmd.action == "goto":
-            set_velocity(max(-14, min(14, (cmd.x - pos.x) * 0.5)),
-                         max(-14, min(14, (cmd.z - pos.z) * 0.5)))
-            set_altitude(cmd.y)
+    地面 = heights[2][2]
+    高度 = 地面 + 9.0
+
+    # 0) 掉进水里：先往上游，别淹死
+    if water > 0.6:
+        set_velocity(0.0, 0.0)
+        set_altitude(pos.y + 4.0)
+        drill(False)
+        laser_off()
+        return
+
+    # 1) 电量告急：回自家上空省电（不干活、不追人）
+    if energy_ratio < 0.25:
+        set_velocity(0.0, 0.0)
+        set_altitude(地面 + 5.0)
+        drill(False)
+        laser_off()
+        return
+
+    # 2) 玩家标的活最优先：挖 / 放
+    if len(orders) > 0:
+        单 = orders[0]
+        if 单.dist > 3.5:
+            贴到(单.x, 单.z, 15.0, float(单.y) + 3.0)
             return
+        set_velocity(0.0, 0.0)
+        if 单.action == "mine":
+            drill(True)
+            laser(单.x + 0.5, 单.y + 0.5, 单.z + 0.5)
+        elif 单.action == "place":
+            place(单.id, 单.x, 单.y, 单.z)
+        return
+
+    # 3) 队友/指挥官的指令
+    if len(cmd) > 0:
         if cmd.action == "hold":
             set_velocity(0.0, 0.0)
+            set_altitude(cmd.y + 4.0)
             return
-    # 1) 决定去哪：有玩家的标记就去最近的标记，否则去目标点
-    去x = 目标x
-    去y = 目标y
-    去z = 目标z
-    if len(orders) > 0:
-        去x = orders[0].x + 0.5
-        去y = orders[0].y + 2.5
-        去z = orders[0].z + 0.5
-    elif 目标y == 0:
-        去y = heights[2][2] + 6
+        if cmd.action == "goto":
+            if abs(cmd.x - pos.x) + abs(cmd.z - pos.z) > 2.0:
+                贴到(cmd.x, cmd.z, 16.0, cmd.y)
+            else:
+                set_velocity(0.0, 0.0)
+                set_altitude(cmd.y + 4.0)
+            return
+        if cmd.action == "attack":
+            if abs(cmd.x - pos.x) + abs(cmd.z - pos.z) > 7.0:
+                贴到(cmd.x, cmd.z, 17.0, max(地面 + 7.0, cmd.y))
+            else:
+                set_velocity(0.0, 0.0)
+                laser(cmd.x, cmd.y, cmd.z)
+                shoot(cmd.x, cmd.y, cmd.z)
+            return
 
-    # 2) A* 算航路，自己朝航路上的第一个点飞
-    航路 = find_path(去x, 去y, 去z)
-    点x = 去x
-    点y = 去y
-    点z = 去z
-    if len(航路) > 0:
-        点x = 航路[0].x
-        点y = 航路[0].y
-        点z = 航路[0].z
-    差x = 点x - pos.x
-    差z = 点z - pos.z
-    距离 = (差x * 差x + 差z * 差z) ** 0.5
-    # 到的了这个点就按巡航速度冲，快到了就减速
-    想x = max(-速度, min(速度, 差x * 1.5))
-    想z = max(-速度, min(速度, 差z * 1.5))
-    # 3) 下指令：想要的速度 + 想要的高度（引擎每帧自己闭环，所以不抖）
-    set_velocity(想x, 想z)
-    set_altitude(点y)
-
-    # 5) 到标记旁边就干活：挖掘用钻头 + 激光
-    干活 = len(orders) > 0 and orders[0].dist < 3
-    drill(干活 and orders[0].action == "mine")
-    if 干活 and orders[0].action == "mine":
-        laser(orders[0].x + 0.5, orders[0].y + 0.5, orders[0].z + 0.5)
-    else:
-        laser_off()
-
-    # 6) 看到敌人就打：15 米内开炮，5 米内再加激光
+    # 4) 有敌人：报点 → 选最脆的 → 风筝打法
     if len(enemies) > 0:
-        if enemies[0].dist <= 15:
-            shoot(enemies[0].x, enemies[0].y, enemies[0].z)
-        if enemies[0].dist <= 5:
-            laser(enemies[0].x, enemies[0].y, enemies[0].z)
+        敌 = 找目标()
+        if t - mem["上次报点"] > 5.0:
+            报点(敌)
+        高度 = max(地面 + 6.0, 敌.y + 1.0)
+
+        # 残血：先拉出激光射程（8 格）之外，边退边打
+        if hp_ratio < 0.35:
+            贴到(回家(), 128.0, 17.0, 地面 + 12.0)
+            if 敌.dist <= 8.0:
+                laser(敌.x, 敌.y, 敌.z)
+            return
+
+        # 主循环：4~7 格是理想射程（激光 8，炮 15）
+        if 敌.dist > 7.0:
+            贴到(敌.x, 敌.z, 18.0, 高度)
+        elif 敌.dist < 3.0:
+            # 太近会被钻头/自爆糊脸：侧向拉开
+            if t - mem["上次转向"] > 1.2:
+                mem["走位方向"] = -mem["走位方向"]
+                mem["上次转向"] = t
+            set_velocity(0.0, 11.0 * mem["走位方向"])
+            set_altitude(高度 + 2.0)
+        else:
+            # 射程内：横向绕圈，别悬停成靶子
+            if t - mem["上次转向"] > 1.5:
+                mem["走位方向"] = -mem["走位方向"]
+                mem["上次转向"] = t
+            set_velocity(-4.0, 7.0 * mem["走位方向"])
+            set_altitude(高度)
+
+        if 敌.dist <= 8.0:
+            laser(敌.x, 敌.y, 敌.z)
+        else:
+            laser_off()
+        if 敌.dist <= 15.0:
+            shoot(敌.x, 敌.y + 0.4, 敌.z)
+        if 敌.dist <= 3.2:
+            drill(True)
+        else:
+            drill(False)
+        return
+
+    # 5) 没敌人：去队友报的点看看，但别一个人冲进对面家
+    if len(marks) > 0:
+        标 = marks[0]
+        if 标.dist > 9.0:
+            贴到(标.x, 标.z, 16.0, 地面 + 9.0)
+        else:
+            set_velocity(0.0, 0.0)
+            set_altitude(标.y + 6.0)
+        drill(False)
+        laser_off()
+        return
+
+    # 6) 完全没事：往中线集合；队友少就靠家一点，人多再压上去
+    队友 = len(allies) + 1
+    if team == 0:
+        if 队友 < 3:
+            线 = 96.0
+        else:
+            线 = 126.0
+        方向 = 1.0
+    else:
+        if 队友 < 3:
+            线 = 160.0
+        else:
+            线 = 130.0
+        方向 = -1.0
+
+    偏移 = pos.x - 线
+    if 偏移 * 方向 < -6.0:
+        # 还没到集合线：朝它飞（蓝方往右、红方往左）
+        set_velocity(16.0 * 方向, 0.0)
+    elif 偏移 * 方向 > 6.0:
+        # 冲过头了：退回来
+        set_velocity(-16.0 * 方向, 0.0)
+    else:
+        # 在线上：沿 z 小幅巡逻等敌情
+        if mem["待命方向"] > 0:
+            set_velocity(0.0, 8.0)
+        else:
+            set_velocity(0.0, -8.0)
+        if pos.z > 140.0:
+            mem["待命方向"] = -1
+        if pos.z < 116.0:
+            mem["待命方向"] = 1
+
+    set_altitude(高度)
+    drill(False)
+    laser_off()
 """
