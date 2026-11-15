@@ -23,6 +23,16 @@ _find_godot() {
 		return 0
 	fi
 
+	# 仓库根目录的 .godot_path（每台机器一份，已在 .gitignore 里）：写一行引擎绝对路径即可
+	if [ -f "./.godot_path" ]; then
+		hint=$(head -n 1 ./.godot_path 2>/dev/null)
+		hint=${hint%$'\r'}
+		if _godot_is_exec "$hint"; then
+			printf '%s\n' "$hint"
+			return 0
+		fi
+	fi
+
 	for name in godot godot4 godot4.7 Godot godot-mono; do
 		path=$(command -v "$name" 2>/dev/null) || continue
 		if _godot_is_exec "$path"; then
@@ -54,7 +64,13 @@ _find_godot() {
 		"${HOME:-/nonexistent}/bin/godot" \
 		"${HOME:-/nonexistent}/Applications/Godot_v4.7-stable_linux.x86_64" \
 		"${HOME:-/nonexistent}/Godot/Godot" \
-		"${HOME:-/nonexistent}"/Godot_v4*_linux*; do
+		"${HOME:-/nonexistent}"/Godot_v4*_linux* \
+		"${HOME:-/nonexistent}"/Desktop/Godot*.app/Contents/MacOS/Godot \
+		"${HOME:-/nonexistent}"/Downloads/Godot*.app/Contents/MacOS/Godot \
+		"${HOME:-/nonexistent}"/Desktop/Godot_v4*_macos*/Godot.app/Contents/MacOS/Godot \
+		"${HOME:-/nonexistent}"/Downloads/Godot_v4*_macos*/Godot.app/Contents/MacOS/Godot \
+		"${HOME:-/nonexistent}"/Desktop/Godot_v4*_macos*/Godot \
+		"${HOME:-/nonexistent}"/Downloads/Godot_v4*_macos*/Godot; do
 		if _godot_is_exec "$path"; then
 			printf '%s\n' "$path"
 			return 0
@@ -71,7 +87,11 @@ _find_godot() {
 		/d/Godot*/Godot*.exe \
 		/c/ProgramData/chocolatey/bin/godot.exe \
 		"${LOCALAPPDATA:-/nonexistent}"/Programs/Godot*/Godot*.exe \
-		"${HOME:-/nonexistent}"/scoop/apps/godot*/current/Godot*.exe; do
+		"${HOME:-/nonexistent}"/scoop/apps/godot*/current/Godot*.exe \
+		"${HOME:-/nonexistent}"/Desktop/Godot*.exe \
+		"${HOME:-/nonexistent}"/Desktop/Godot*/Godot*.exe \
+		"${HOME:-/nonexistent}"/Downloads/Godot*.exe \
+		"${HOME:-/nonexistent}"/Downloads/Godot*/Godot*.exe; do
 		if _godot_is_exec "$path"; then
 			printf '%s\n' "$path"
 			return 0
@@ -88,6 +108,7 @@ if ! GODOT=$(_find_godot); then
 		echo "  · macOS 一般在 /Applications/Godot.app/Contents/MacOS/Godot"
 		echo "  · Windows 双击版一般在 C:\\Program Files\\Godot\\Godot.exe，可用 \$env:GODOT 指定"
 		echo "  · Linux 用发行版包安装的通常已在 PATH 里（godot）"
+		echo "  · 也可以把引擎绝对路径写进仓库根的 .godot_path（一行）"
 	} >&2
 	return 1 2>/dev/null || exit 1
 fi

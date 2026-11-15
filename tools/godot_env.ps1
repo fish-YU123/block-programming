@@ -19,6 +19,18 @@ function Find-Godot {
 		return (Resolve-Path -LiteralPath $Path).Path
 	}
 
+	# 仓库根的 .godot_path（每台机器一份，已在 .gitignore 里）
+	$hint = Join-Path (Get-Location) '.godot_path'
+	if (Test-Path -LiteralPath $hint -PathType Leaf) {
+		$first = (Get-Content -LiteralPath $hint -TotalCount 1)
+		if ($first) {
+			$first = $first.Trim()
+			if ($first -and (Test-Path -LiteralPath $first -PathType Leaf)) {
+				return (Resolve-Path -LiteralPath $first).Path
+			}
+		}
+	}
+
 	foreach ($name in 'godot', 'godot4', 'Godot', 'godot-mono') {
 		$cmd = Get-Command $name -ErrorAction SilentlyContinue
 		if ($cmd) { return $cmd.Source }
@@ -40,6 +52,11 @@ function Find-Godot {
 	if ($HOME) {
 		$candidates += (Join-Path $HOME 'scoop\apps\godot\current\Godot.exe')
 		$candidates += (Join-Path $HOME 'Applications/Godot.app/Contents/MacOS/Godot')
+		# 直接放在桌面 / 下载里的引擎（很常见）
+		$candidates += (Join-Path $HOME 'Desktop/Godot.app/Contents/MacOS/Godot')
+		$candidates += (Join-Path $HOME 'Downloads/Godot.app/Contents/MacOS/Godot')
+		$candidates += (Join-Path $HOME 'Desktop/Godot.exe')
+		$candidates += (Join-Path $HOME 'Downloads/Godot.exe')
 	}
 
 	foreach ($c in $candidates) {
@@ -49,7 +66,8 @@ function Find-Godot {
 	}
 
 	# 版本化目录，例如 C:\Program Files\Godot_v4.7-stable_win64\Godot_v4.7-stable_win64.exe
-	$roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA, $env:USERPROFILE, 'C:\', 'D:\') |
+	$roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA, $env:USERPROFILE,
+		(Join-Path $env:USERPROFILE 'Desktop'), (Join-Path $env:USERPROFILE 'Downloads'), 'C:\', 'D:\') |
 		Where-Object { $_ -and (Test-Path -LiteralPath $_) }
 	foreach ($root in $roots) {
 		$dirs = Get-ChildItem -LiteralPath $root -Directory -Filter 'Godot*' -ErrorAction SilentlyContinue
@@ -63,5 +81,6 @@ function Find-Godot {
 
 	throw ("找不到 Godot 可执行文件（需要 Godot 4.7 或更新的标准版）。`n" +
 		"  显式指定：`$env:GODOT = 'C:\路径\Godot.exe'`n" +
-		"  Windows 双击版一般在 C:\Program Files\Godot\Godot.exe")
+		"  Windows 双击版一般在 C:\Program Files\Godot\Godot.exe`n" +
+		"  也可以把引擎绝对路径写进仓库根的 .godot_path（一行）")
 }

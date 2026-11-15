@@ -212,6 +212,8 @@ docs/              预览图与玩家/开发文档
 ## 截图
 
 ![世界](docs/preview.png)
+![水与湖](docs/preview-water.png)
+![12 种单位造型](docs/preview-unit-models.png)
 ![飞飞](docs/preview-unit.png)
 ![激光与炮管](docs/preview-weapons.png)
 ![施工剖面](docs/preview-building.png)
