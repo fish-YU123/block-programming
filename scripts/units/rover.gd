@@ -386,7 +386,7 @@ func _build_visual() -> void:
 	var body_mesh := BoxMesh.new()
 	body_mesh.size = Vector3(1.0, 0.45, 1.5) * k
 	body.mesh = body_mesh
-	body.material_override = MatCache.solid("rover_body", Color(0.86, 0.72, 0.32))
+	body.material_override = MatCache.outlined("rover_body", Color(0.86, 0.72, 0.32))
 	body.position.y = 0.05
 	add_child(body)
 
@@ -394,7 +394,7 @@ func _build_visual() -> void:
 	var cabin_mesh := BoxMesh.new()
 	cabin_mesh.size = Vector3(0.7, 0.35, 0.6) * k
 	cabin.mesh = cabin_mesh
-	cabin.material_override = MatCache.solid("rover_cabin", Color(0.34, 0.4, 0.46))
+	cabin.material_override = MatCache.outlined("rover_cabin", Color(0.34, 0.4, 0.46))
 	cabin.position = Vector3(0.0, 0.42, -0.25) * k
 	add_child(cabin)
 
@@ -405,7 +405,7 @@ func _build_visual() -> void:
 	drill_mesh.bottom_radius = 0.11 * k
 	drill_mesh.height = 0.5 * k
 	drill.mesh = drill_mesh
-	drill.material_override = MatCache.solid("rover_drill", Color(0.62, 0.64, 0.68))
+	drill.material_override = MatCache.outlined("rover_drill", Color(0.62, 0.64, 0.68))
 	drill.rotation.x = PI * 0.5
 	drill.position = Vector3(0.0, 0.0, -1.0) * k
 	add_child(drill)
@@ -425,7 +425,7 @@ func _build_visual() -> void:
 		wheel_mesh.bottom_radius = 0.22 * k
 		wheel_mesh.height = 0.14 * k
 		wheel.mesh = wheel_mesh
-		wheel.material_override = MatCache.solid("rover_wheel", Color(0.16, 0.16, 0.18))
+		wheel.material_override = MatCache.outlined("rover_wheel", Color(0.16, 0.16, 0.18))
 		wheel.rotation.z = PI * 0.5
 		var holder := Node3D.new()
 		holder.position = off * k
@@ -448,7 +448,7 @@ func _build_minelayer_visual(k: float) -> void:
 	var hull_mesh := BoxMesh.new()
 	hull_mesh.size = Vector3(1.05, 0.34, 1.55) * k
 	hull.mesh = hull_mesh
-	hull.material_override = MatCache.solid("minelayer_hull", Color(0.28, 0.3, 0.34))
+	hull.material_override = MatCache.outlined("minelayer_hull", Color(0.28, 0.3, 0.34))
 	hull.position.y = 0.02 * k
 	add_child(hull)
 
@@ -456,7 +456,7 @@ func _build_minelayer_visual(k: float) -> void:
 	var cab_mesh := BoxMesh.new()
 	cab_mesh.size = Vector3(0.66, 0.32, 0.5) * k
 	cab.mesh = cab_mesh
-	cab.material_override = MatCache.solid("minelayer_cab", Color(0.36, 0.42, 0.5))
+	cab.material_override = MatCache.outlined("minelayer_cab", Color(0.36, 0.42, 0.5))
 	cab.position = Vector3(0.0, 0.3 * k, -0.3 * k)
 	add_child(cab)
 
@@ -491,7 +491,7 @@ func _build_minelayer_visual(k: float) -> void:
 			wheel_mesh.bottom_radius = 0.24 * k
 			wheel_mesh.height = 0.16 * k
 			wheel.mesh = wheel_mesh
-			wheel.material_override = MatCache.solid("minelayer_wheel", Color(0.12, 0.12, 0.14))
+			wheel.material_override = MatCache.outlined("minelayer_wheel", Color(0.12, 0.12, 0.14))
 			wheel.rotation = Vector3(0.0, 0.0, PI * 0.5)
 			wheel.position = Vector3(sx * 0.56 * k, -0.12 * k, sz * 0.5 * k)
 			add_child(wheel)

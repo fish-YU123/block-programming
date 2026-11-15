@@ -88,8 +88,9 @@ func _build_visual() -> void:
 	# 队伍色：蓝方深蓝、红方赤红；建筑本体的细节用深浅两色分层
 	var team_main := Color(0.22, 0.38, 0.78) if team == 0 else Color(0.72, 0.2, 0.18)
 	var team_glow := Color(0.35, 0.9, 1.0) if team == 0 else Color(1.0, 0.66, 0.22)
-	var frame_mat: StandardMaterial3D = MatCache.solid("building_frame", Color(0.20, 0.22, 0.26))
-	var body_mat: StandardMaterial3D = MatCache.solid("building_body_%s_%d" % [str(def.get("id", "")), team], team_main)
+	# 画风统一：结构件「纯色 + 描边」，发光带/核心等发光件保持纯发光不加描边
+	var frame_mat: StandardMaterial3D = MatCache.outlined("building_frame", Color(0.20, 0.22, 0.26))
+	var body_mat: StandardMaterial3D = MatCache.outlined("building_body_%s_%d" % [str(def.get("id", "")), team], team_main)
 	var glow_mat: StandardMaterial3D = MatCache.of(team_glow, false, 0.55)
 
 	var sx := float(size.x)

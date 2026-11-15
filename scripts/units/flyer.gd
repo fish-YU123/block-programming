@@ -624,7 +624,7 @@ func _build_visual() -> void:
 	# 机身配色按队伍区分：蓝方=深蓝 + 青色识别条，红方=赤红 + 橙色识别条
 	var body_color := Color(0.16, 0.28, 0.62) if team == 0 else Color(0.62, 0.15, 0.14)
 	var trim_color := Color(0.28, 0.85, 0.95) if team == 0 else Color(0.98, 0.62, 0.18)
-	var body_mat: StandardMaterial3D = MatCache.solid("flyer_body_%d" % team, body_color)
+	var body_mat: StandardMaterial3D = MatCache.outlined("flyer_body_%d" % team, body_color)
 	var trim_mat: StandardMaterial3D = MatCache.solid("flyer_trim_%d" % team, trim_color)
 	var glass_mat: StandardMaterial3D = MatCache.solid("flyer_glass_%d" % team, Color(0.3, 0.75, 0.9), false, 1.0)
 
@@ -743,7 +743,7 @@ func _build_visual() -> void:
 	_radar_dome = radar
 
 	# 机背炮管（沿 -Z 伸出），带一小段炮尾
-	var gun_mat: StandardMaterial3D = MatCache.solid("flyer_gun", Color(0.16, 0.17, 0.2))
+	var gun_mat: StandardMaterial3D = MatCache.outlined("flyer_gun", Color(0.16, 0.17, 0.2))
 	var barrel := MeshInstance3D.new()
 	var barrel_mesh := CylinderMesh.new()
 	barrel_mesh.top_radius = 0.028

@@ -11,7 +11,7 @@ cd "$(dirname "$0")/../.." || exit 1
 
 SHOTS="preview_shot unit_preview weapons_preview build_preview construction_preview
 	hud_preview anim_preview team_preview charger_preview panel_preview
-	mp_preview loading_preview"
+	mp_preview loading_preview style_preview"
 
 selected=""
 for shot in $SHOTS; do

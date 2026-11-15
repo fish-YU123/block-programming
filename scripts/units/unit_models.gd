@@ -16,13 +16,14 @@ static func build(unit_id: String, team: int) -> Node3D:
 	model.name = "Model"
 	var body_color := Color(0.16, 0.28, 0.62) if team == 0 else Color(0.62, 0.15, 0.14)
 	var trim_color := Color(0.28, 0.85, 0.95) if team == 0 else Color(0.98, 0.62, 0.18)
-	var body: StandardMaterial3D = MatCache.solid("u_body_%s_%d" % [unit_id, team], body_color)
+	# 画风统一：结构件一律「纯色 + 描边」（MatCache.outlined），发光件/喷口不加描边
+	var body: StandardMaterial3D = MatCache.outlined("u_body_%s_%d" % [unit_id, team], body_color)
 	var trim: StandardMaterial3D = MatCache.solid("u_trim_%s_%d" % [unit_id, team], trim_color)
-	var dark: StandardMaterial3D = MatCache.solid("u_dark", Color(0.18, 0.19, 0.22))
-	var metal: StandardMaterial3D = MatCache.solid("u_metal", Color(0.55, 0.58, 0.62))
-	var warm: StandardMaterial3D = MatCache.solid("u_warm", Color(0.95, 0.55, 0.18), false, 0.4)
+	var dark: StandardMaterial3D = MatCache.outlined("u_dark", Color(0.18, 0.19, 0.22))
+	var metal: StandardMaterial3D = MatCache.outlined("u_metal", Color(0.55, 0.58, 0.62))
+	var warm: StandardMaterial3D = MatCache.solid("u_warm", Color(0.95, 0.55, 0.18), false, 0.4, false, 1.0, true)
 	var glow: StandardMaterial3D = MatCache.of(trim_color, true, 0.8)
-	var red: StandardMaterial3D = MatCache.solid("u_warhead", Color(0.85, 0.2, 0.16), false, 0.3)
+	var red: StandardMaterial3D = MatCache.solid("u_warhead", Color(0.85, 0.2, 0.16), false, 0.3, false, 1.0, true)
 
 	match unit_id:
 		"builder":

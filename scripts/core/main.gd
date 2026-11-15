@@ -2574,11 +2574,17 @@ func _prewarm_visuals() -> void:
 	MatCache.of(Color(0.45, 0.85, 1.0), true, 0.6, true, 0.55)    # 施工幽灵
 	MatCache.of(Color(0.9, 0.25, 0.2), true, 0.5, false, 0.85)    # 罢工红
 	MatCache.of(Color(0.15, 0.40, 0.74, 0.80), false, 0.0, false, 0.80)  # 水
+	# 单位/建筑结构件现在都是「纯色 + 描边」，预热必须走 outlined，
+	# 否则预热的是无描边的 key，第一次 spawn 仍会现编译（含 next_pass 的描边管线）。
 	if unit_db != null:
 		for uid in unit_db.order:
 			for team in [TEAM_BLUE, TEAM_RED]:
-				MatCache.solid("u_body_%s_%d" % [str(uid), team], Color(0.2, 0.3, 0.6))
-				MatCache.solid("u_body_%s_%d" % [str(uid), team], Color(0.6, 0.2, 0.2))
+				MatCache.outlined("u_body_%s_%d" % [str(uid), team], Color(0.2, 0.3, 0.6))
+				MatCache.outlined("u_body_%s_%d" % [str(uid), team], Color(0.6, 0.2, 0.2))
+	MatCache.outlined("u_dark", Color(0.18, 0.19, 0.22))
+	MatCache.outlined("u_metal", Color(0.55, 0.58, 0.62))
+	MatCache.outlined("building_frame", Color(0.20, 0.22, 0.26))
+	MatCache.outline_material()
 
 
 func _install_environment() -> void:

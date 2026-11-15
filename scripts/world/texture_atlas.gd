@@ -6,6 +6,12 @@ extends RefCounted
 ## 贴图里已经烘焙了方块基色（来自 data/blocks/*.json），
 ## 顶点色只负责面明暗和环境光遮蔽（AO），避免同一个颜色被乘两次。
 ##
+## 画风（2026-11 统一）：**双色低噪**。
+## 每个面只用两种颜色——方块基色 + 同色相暗一档的第二色（TONE_DARK 比例），
+## 用 4×4 Bayer 有序抖动 + 2×2 块哈希决定每个像素落在哪一档：
+## 近看是干净的像素噪点，远看还是整块纯色，不会像旧版那样大大小小的深浅斑块糊成一团。
+## 唯二例外：草方块侧面用「草色 + 泥土色」两种纯色（不做抖动）；矿石面在石头双色上再加矿色（+1 个高光色）保证可辨识。
+##
 ## 所有像素都用确定性哈希逐像素画出来：同样的方块数据每次生成结果完全一致，
 ## 不会有随机闪烁，也不依赖任何外部资源。
 
@@ -20,6 +26,13 @@ const CELLS := COLS * ROWS
 const FACE_TOP := 0
 const FACE_BOTTOM := 1
 const FACE_SIDE := 2
+
+## 第二色（暗色）= 主色 × 这个比例。所有方块统一，保证整体对比度一致、不刺眼。
+const TONE_DARK := 0.86
+
+## Bayer 4×4 有序抖动阈值表（0..15）。用有序抖动而不是纯随机，
+## 噪点会排成稳定的像素网点，放大看是像素风的规则颗粒，而不是脏噪。
+const BAYER4 := [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]
 
 ## 生成的图集图像（RGBA8，未使用的格子透明）
 var image: Image
@@ -93,15 +106,16 @@ func _paint(cell: int, material: String, base: Color, stone: Color, dirt: Color,
 	var oy := (cell / COLS) * CELL
 	match material:
 		"grass":
-			_paint_grass_top(ox, oy, base, seed)
+			# 草顶：主色 + 略暗的草簇
+			_two_tone(ox, oy, base, 0.26, seed)
 		"grass_side":
 			_paint_grass_side(ox, oy, base, dirt, seed)
 		"dirt":
-			_paint_dirt(ox, oy, base, seed)
+			_two_tone(ox, oy, base, 0.30, seed)
 		"sand":
-			_paint_sand(ox, oy, base, seed)
+			_two_tone(ox, oy, base, 0.14, seed)
 		"stone":
-			_paint_stone(ox, oy, base, seed)
+			_two_tone(ox, oy, base, 0.30, seed)
 		"coal_ore":
 			_paint_ore(ox, oy, stone, seed, Color(0.07, 0.07, 0.08), Color(0.34, 0.34, 0.36))
 		"copper_ore":
@@ -111,11 +125,12 @@ func _paint(cell: int, material: String, base: Color, stone: Color, dirt: Color,
 		"gold_ore":
 			_paint_ore(ox, oy, stone, seed, base, Color(1.0, 0.86, 0.42))
 		"bedrock":
-			_paint_bedrock(ox, oy, base, seed)
+			# 基岩：整张图本来就暗，用更暗一档的第二色，仍然只有两种颜色
+			_two_tone(ox, oy, base, 0.38, seed)
 		"planks":
 			_paint_planks(ox, oy, base, seed)
 		_:
-			_paint_stone(ox, oy, base, seed)
+			_two_tone(ox, oy, base, 0.30, seed)
 
 
 # ---------------------------------------------------------------- 通用工具
@@ -131,6 +146,10 @@ func _hash(x: int, y: int, seed: int) -> int:
 ## 由坐标+种子得到 0..1 的确定性伪随机数
 func _rand(x: int, y: int, seed: int) -> float:
 	return float(_hash(x, y, seed) % 8192) / 8192.0
+
+
+func _bayer(x: int, y: int) -> float:
+	return float(BAYER4[(y & 3) * 4 + (x & 3)]) / 16.0
 
 
 func _color_scale(c: Color, k: float) -> Color:
@@ -155,137 +174,65 @@ func _put(ox: int, oy: int, x: int, y: int, c: Color) -> void:
 	image.set_pixel(ox + x, oy + y, c)
 
 
+# ---------------------------------------------------------------- 双色低噪底纹
+
+## 双色低噪底纹：light 为主色，dark = light × TONE_DARK。
+## density 是暗色像素的占比（0..1）。抖动值 = 有序抖动 × 0.55 + 2×2 块哈希 × 0.45：
+## 有规律的网点 + 成簇的块，既有像素风颗粒感，又不会出现高对比的单个脏点。
+func _two_tone(ox: int, oy: int, light: Color, density: float, seed: int) -> void:
+	var dark := _color_scale(light, TONE_DARK)
+	for y in CELL:
+		for x in CELL:
+			var t := _bayer(x, y) * 0.55 + _rand(x >> 1, y >> 1, seed) * 0.45
+			_put(ox, oy, x, y, dark if t < density else light)
+
+
 # ---------------------------------------------------------------- 各种材质
 
-## 草方块顶面：绿色噪点 + 少量深浅草簇
-func _paint_grass_top(ox: int, oy: int, base: Color, seed: int) -> void:
-	for y in CELL:
-		for x in CELL:
-			var fine := _rand(x, y, seed) - 0.5
-			var clump := _rand(x >> 1, y >> 1, seed + 31) - 0.5
-			var k := 1.0 + fine * 0.30 + clump * 0.24
-			var r := _rand(x, y, seed + 7)
-			if r < 0.07:
-				k -= 0.15
-			elif r > 0.95:
-				k += 0.12
-			_put(ox, oy, x, y, _color_scale(base, k))
-
-
-## 泥土：棕色颗粒 + 零星小石子/深色土块
-func _paint_dirt(ox: int, oy: int, base: Color, seed: int) -> void:
-	for y in CELL:
-		for x in CELL:
-			var fine := _rand(x, y, seed) - 0.5
-			var clump := _rand(x >> 1, y >> 1, seed + 53) - 0.5
-			var k := 1.0 + fine * 0.30 + clump * 0.22
-			var r := _rand(x, y, seed + 11)
-			if r < 0.05:
-				k -= 0.22
-			elif r > 0.96:
-				k += 0.14
-			if _rand(x >> 1, y >> 1, seed + 71) < 0.13:
-				k -= 0.12
-			_put(ox, oy, x, y, _color_scale(base, k))
-
-
-## 沙子：浅色细颗粒，对比度低一点
-func _paint_sand(ox: int, oy: int, base: Color, seed: int) -> void:
-	for y in CELL:
-		for x in CELL:
-			var fine := _rand(x, y, seed) - 0.5
-			var clump := _rand(x >> 1, y >> 1, seed + 17) - 0.5
-			var k := 1.0 + fine * 0.16 + clump * 0.10
-			var r := _rand(x, y, seed + 5)
-			if r < 0.07:
-				k -= 0.10
-			elif r > 0.94:
-				k += 0.08
-			_put(ox, oy, x, y, _color_scale(base, k))
-
-
-## 石头：灰色噪点 + 大小不一的斑块和深色矿物点
-func _paint_stone(ox: int, oy: int, base: Color, seed: int) -> void:
-	for y in CELL:
-		for x in CELL:
-			var fine := _rand(x, y, seed) - 0.5
-			var clump := _rand(x >> 1, y >> 1, seed + 19) - 0.5
-			var k := 1.0 + fine * 0.22 + clump * 0.28
-			var blotch := _rand(x >> 1, y >> 1, seed + 43)
-			if blotch < 0.16:
-				k -= 0.15
-			elif blotch > 0.88:
-				k += 0.10
-			var r := _rand(x, y, seed + 3)
-			if r < 0.04:
-				k -= 0.30
-			elif r > 0.97:
-				k += 0.16
-			_put(ox, oy, x, y, _color_scale(base, k))
-
-
-## 草方块侧面：泥土打底，顶上覆盖 2~5 像素不规则的草边
+## 草方块侧面：泥土纯色打底 + 顶上 2~5 像素不规则的草边。
+## 这个面是「草色 + 泥土色」两种纯色（不做抖动），因为两种颜色已经够区分了。
 func _paint_grass_side(ox: int, oy: int, grass: Color, dirt: Color, seed: int) -> void:
-	_paint_dirt(ox, oy, dirt, seed + 17)
+	for y in CELL:
+		for x in CELL:
+			_put(ox, oy, x, y, dirt)
 	for x in CELL:
 		var depth := 2 + int(_rand(x, 0, seed) * 4.0)
 		if _rand(x, 1, seed) < 0.18:
 			depth += 1
 		for y in depth:
-			var fine := _rand(x, y, seed + 21) - 0.5
-			var k := 1.0 + fine * 0.30
-			if y == depth - 1:
-				k -= 0.12  # 最底下一行略暗，像草垂下来
-			_put(ox, oy, x, y, _color_scale(grass, k))
+			_put(ox, oy, x, y, grass)
 
 
-## 矿石：石头底子上撒几团矿点（煤矿黑点/铜矿铜色+绿锈）
+## 矿石：石头双色底 + 几团矿点（2×2 团 + 零星高光像素）
 func _paint_ore(ox: int, oy: int, stone: Color, seed: int, ore: Color, accent: Color) -> void:
-	_paint_stone(ox, oy, stone, seed)
+	_two_tone(ox, oy, stone, 0.30, seed)
 	for i in 6:
 		var cx := 1 + _hash(i, 1, seed + 5) % 12
 		var cy := 1 + _hash(i, 2, seed + 9) % 12
-		var color := ore if i % 3 != 0 else _mix(ore, accent, 0.5)
-		# 2×2 的小矿团，再随机多挂一两颗
+		# 2×2 的小矿团
 		for px in 2:
 			for py in 2:
-				_put(ox, oy, cx + px, cy + py, color)
+				_put(ox, oy, cx + px, cy + py, ore)
 		if _hash(i, 3, seed) % 2 == 0:
-			_put(ox, oy, cx + 2, cy, _mix(color, Color.BLACK, 0.25))
+			_put(ox, oy, cx + 2, cy, accent)
 		if _hash(i, 4, seed) % 2 == 0:
 			_put(ox, oy, cx, cy + 2, accent)
 
 
-## 基岩：深灰高对比斑块 + 黑色裂缝
-func _paint_bedrock(ox: int, oy: int, base: Color, seed: int) -> void:
-	for y in CELL:
-		for x in CELL:
-			var patch := _rand(x >> 2, y >> 2, seed + 13) - 0.5
-			var clump := _rand(x >> 1, y >> 1, seed + 41) - 0.5
-			var fine := _rand(x, y, seed) - 0.5
-			var k := 1.0 + patch * 0.45 + clump * 0.35 + fine * 0.20
-			if _rand(x >> 1, y >> 1, seed + 77) < 0.14:
-				k -= 0.40  # 黑色裂缝
-			_put(ox, oy, x, y, _color_scale(base, k))
-
-
-## 木板：水平木板 + 板缝 + 错开的竖向拼缝 + 木纹
+## 木板：主色 + 暗一档，水平板缝 + 错开的竖向拼缝都直接用暗色画（还是两种颜色）
 func _paint_planks(ox: int, oy: int, base: Color, seed: int) -> void:
+	var dark := _color_scale(base, 0.80)
 	for y in CELL:
 		var board := y / 4
-		var row := y % 4
-		var board_k := 1.0 + (float(_hash(board, 0, seed) % 100) / 100.0 - 0.5) * 0.16
 		var seam_x := 2 + _hash(board, 5, seed) % 11
 		for x in CELL:
-			var k := board_k
-			k += (_rand(x, y, seed + board * 31) - 0.5) * 0.14
-			# 顺纹方向的长条纹理
-			if _rand(x >> 3, y, seed + 9) < 0.16:
-				k -= 0.10
-			if row == 3:
-				k -= 0.22  # 水平板缝
-			elif row == 0:
-				k += 0.05
-			if x == seam_x:
-				k -= 0.20  # 竖向拼缝
-			_put(ox, oy, x, y, _color_scale(base, k))
+			var is_dark := false
+			if y % 4 == 3:
+				is_dark = true          # 水平板缝
+			elif x == seam_x:
+				is_dark = true          # 竖向拼缝
+			else:
+				# 木纹：稀疏短纹，仍然只用暗色
+				var t := _bayer(x, y) * 0.6 + _rand(board, x >> 2, seed + 9) * 0.4
+				is_dark = t < 0.13
+			_put(ox, oy, x, y, dark if is_dark else base)
