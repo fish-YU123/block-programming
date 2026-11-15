@@ -757,6 +757,13 @@ func _rebuild(chunk: Chunk) -> void:
 
 
 ## 该格是否允许建造/破坏（现在全图都可建造，保留接口给以后的规则用）
+## 创造模式之类需要隐藏分界线时调用
+func set_boundaries_visible(on: bool) -> void:
+	for node in _line_nodes:
+		if node != null and is_instance_valid(node):
+			node.visible = on
+
+
 func is_buildable(cell: Vector3i) -> bool:
 	return in_bounds(cell)
 

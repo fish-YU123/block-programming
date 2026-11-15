@@ -76,6 +76,8 @@ const RED_START := [{"x": 221.0, "z": 128.0}]
 const PEACE_SECONDS := 60.0
 const SUDDEN_DEATH_SECONDS := 180.0
 var peace_left := PEACE_SECONDS
+## 创造模式：没有红方敌人、没有分界线、资源管够，专心搭东西
+var creative_mode := false
 ## 激光钻头打单位：每秒伤害 / 有效距离
 ## 鼠标射线能够多远
 const AIM_RANGE := 40.0
@@ -152,6 +154,9 @@ func _ready() -> void:
 	world.name = "World"
 	add_child(world)
 	world_seed = _pick_world_seed()
+	for arg in OS.get_cmdline_user_args():
+		if str(arg) == "--creative":
+			creative_mode = true
 	world.setup(db, world_seed, WORLD_SIZE_X, WORLD_SIZE_Z, WORLD_HEIGHT)
 	_install_environment()
 
@@ -174,8 +179,10 @@ func _ready() -> void:
 	world.update_streaming(rig.position)
 
 	economy = Economy.new()
+	economy.changed.connect(_on_economy_changed)
 	economy.setup(db, STARTING_RESOURCES)
 	economy_red = Economy.new()
+	economy_red.changed.connect(_on_economy_changed)
 	economy_red.setup(db, STARTING_RESOURCES)
 	production = Production.new()
 	production.setup(economy)
@@ -900,6 +907,8 @@ func _setup_units() -> void:
 			push_error("找不到预设单位：%s" % spec["id"])
 			continue
 		_spawn_unit(def, Vector3(float(spec["x"]), 0.0, float(spec["z"])), str(spec["code"]), TEAM_BLUE)
+	if creative_mode:
+		return
 	for spec in RED_START:
 		var red_def: Dictionary = unit_db.get_def("feifei")
 		if red_def.is_empty():
@@ -1517,6 +1526,8 @@ func skip_peace() -> void:
 
 
 func _tick_peace(delta: float) -> void:
+	if creative_mode:
+		return
 	if peace_left <= 0.0:
 		return
 	peace_left = maxf(0.0, peace_left - delta)
@@ -2537,6 +2548,8 @@ func _purge_dead() -> void:
 
 
 func _check_victory() -> void:
+	if creative_mode:
+		return
 	if game_over != "" or not _world_ready or units.is_empty():
 		return
 	if _physics_frames < 30:
@@ -2656,8 +2669,73 @@ func _start_game() -> void:
 	hud.set_loading_mode(false)
 	hud.set_loading("")
 	_world_ready_shown = false
-	_setup_units()
-	hud.show_message("世界已生成，双方各一台飞飞开始对局")
+	if creative_mode:
+		_apply_creative_world()
+	else:
+		_setup_units()
+		hud.show_message("世界已生成，双方各一台飞飞开始对局")
+
+
+## 应用创造模式：没有敌人、没有分界线、资源管够
+func _apply_creative_world() -> void:
+	if world != null:
+		world.set_boundaries_visible(false)
+	peace_left = 0.0
+	for entry in units.duplicate():
+		if int(entry.get("team", TEAM_BLUE)) == TEAM_RED:
+			_remove_unit_entry(entry)
+	_give_creative_resources()
+	_refresh_hud()
+	if hud != null:
+		hud.set_peace("创造模式：没有敌人 · 没有分界线 · 资源管够", -1.0)
+		hud.show_message("创造模式：F 放单位 / B 建建筑 / 单击标记挖掘 / 右键标记放置", 8.0)
+
+
+## 资源变化时刷新右上角（以前只在加载阶段刷，开局后就再也不更新了）
+func _on_economy_changed(_resources: Dictionary) -> void:
+	if hud != null:
+		hud.set_resources(_resources_text())
+
+
+## 创造模式给两支队伍都塞满资源
+func _give_creative_resources() -> void:
+	for team in [TEAM_BLUE, TEAM_RED]:
+		var econ = _economy_for(team)
+		if econ == null:
+			continue
+		econ.set_caps({})
+		for kind in ["copper", "coal", "iron", "gold", "steel", "battery"]:
+			econ.add(kind, 999999)
+
+
+## 移除一台单位（创造模式清敌人用）
+func _remove_unit_entry(entry: Dictionary) -> void:
+	var u = entry.get("unit")
+	if u != null and is_instance_valid(u):
+		u.queue_free()
+	units.erase(entry)
+
+
+## 创造模式开关（测试与命令行共用）
+func set_creative_mode(on: bool) -> void:
+	if on == creative_mode:
+		return
+	_toggle_creative_mode()
+
+
+## 切换创造模式（F4）
+func _toggle_creative_mode() -> void:
+	creative_mode = not creative_mode
+	if not _world_ready:
+		return
+	if creative_mode:
+		_apply_creative_world()
+	else:
+		if world != null:
+			world.set_boundaries_visible(true)
+		if hud != null:
+			hud.set_peace("", -1.0)
+			hud.show_message("已关闭创造模式（重开一局才会重新出现敌方单位）", 6.0)
 
 
 ## 载入进度：区块没建完时在屏幕中间显示百分比
@@ -2903,6 +2981,9 @@ func _input(event: InputEvent) -> void:
 	if event.keycode == KEY_P:
 		_cycle_building_production()
 		return
+	if event.keycode == KEY_F4:
+		_toggle_creative_mode()
+		return
 	if event.keycode == KEY_F9:
 		_toggle_python_mode()
 		return
@@ -3024,6 +3105,8 @@ func _update_unit_hud() -> void:
 
 
 func _resources_text() -> String:
+	if creative_mode:
+		return "资源：无限（创造模式）"
 	var parts: PackedStringArray = []
 	var all: Dictionary = economy.all() if economy != null else {}
 	for kind in all:
