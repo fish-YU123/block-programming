@@ -17,13 +17,15 @@ const SnapshotCodec = preload("res://scripts/net/snapshot.gd")
 
 # ---------------------------------------------------------------- 帧头
 
-const PROTOCOL_VERSION := 1
+const PROTOCOL_VERSION := 2
 const HEADER_BYTES := 6
 const MAX_PAYLOAD_BYTES := 1048576          # 单帧负载上限 1 MiB
 const MAX_CODE_BYTES := 65536               # 玩家代码源码上限 64 KiB
 const MAX_NAME_BYTES := 64                  # 玩家名 UTF-8 上限
 const MAX_ERROR_BYTES := 512                # 错误文本 UTF-8 上限
 const MAX_SNAPSHOT_BYTES := 7 + 512 * 23    # snapshot.gd 的最大快照（头 + 512 单位）
+const MAX_ORDER_ID_BYTES := 32              # 虚影指令里的建筑 id（"factory" 这种）上限
+const MAX_WORLD_ENTRIES_PER_MSG := 512      # 单条 WORLD 消息最多带多少个方块改动
 
 # ---------------------------------------------------------------- 消息 id
 
@@ -35,6 +37,11 @@ const MSG_INPUT := 5        # 客户端 -> 服务端：单位控制输入
 const MSG_PING := 6         # 双向：心跳 / RTT 探测
 const MSG_PONG := 7         # 双向：心跳应答
 const MSG_ERROR := 8        # 服务端 -> 客户端：拒绝/错误
+const MSG_WORLD_EDIT := 9   # 服务端 -> 客户端：方块改动（增量，带 revision）
+const MSG_WORLD_ACK := 10   # 客户端 -> 服务端：我应用到哪个 revision 了（丢包补发用）
+const MSG_ORDERS := 11      # 服务端 -> 客户端：全量虚影指令（挖/放/建/拆）
+const MSG_ORDER_TOGGLE := 12 # 客户端 -> 服务端：我点了某个格子上的虚影
+const MSG_BUILDINGS := 13   # 服务端 -> 客户端：全量建筑列表（位置/队伍/血量/进度）
 
 const MSG_NAMES := {
 	1: "HELLO",
@@ -45,7 +52,18 @@ const MSG_NAMES := {
 	6: "PING",
 	7: "PONG",
 	8: "ERROR",
+	9: "WORLD_EDIT",
+	10: "WORLD_ACK",
+	11: "ORDERS",
+	12: "ORDER_TOGGLE",
+	13: "BUILDINGS",
 }
+
+## 虚影指令动作 → 1 字节编码（未知动作一律 0，解码成 "mine"）
+const ORDER_CODES := {"mine": 1, "place": 2, "build": 3, "remove": 4}
+const ORDER_ACTIONS := {1: "mine", 2: "place", 3: "build", 4: "remove"}
+const MAX_ORDERS := 256
+const MAX_BUILDINGS := 64
 
 # ---------------------------------------------------------------- 错误码（ERROR 消息）
 
@@ -376,6 +394,257 @@ static func decode_error(payload: PackedByteArray) -> Dictionary:
 	result["ok"] = true
 	result["code"] = code
 	result["message"] = message
+	return result
+
+
+# ================================================================ WORLD_EDIT
+# payload: u32 base_rev | u16 count | count * (u8 x | u8 y | u8 z | u8 block_id)
+# 语义：这批改动对应 revision base_rev+1 .. base_rev+count，客户端按顺序应用到本地世界。
+# 方块 id 最大 255（当前 12 种），坐标按当前地图上限 256x256x64 用 u8 足够。
+
+static func encode_world_edit(base_rev: int, entries: Array) -> PackedByteArray:
+	var count := mini(entries.size(), MAX_WORLD_ENTRIES_PER_MSG)
+	var buf := StreamPeerBuffer.new()
+	buf.put_u32(base_rev & 0xFFFFFFFF)
+	buf.put_u16(count)
+	for i in count:
+		var e: Dictionary = entries[i]
+		buf.put_u8(clampi(int(e.get("x", 0)), 0, 255))
+		buf.put_u8(clampi(int(e.get("y", 0)), 0, 255))
+		buf.put_u8(clampi(int(e.get("z", 0)), 0, 255))
+		buf.put_u8(clampi(int(e.get("block", 0)), 0, 255))
+	return buf.data_array
+
+
+static func decode_world_edit(payload: PackedByteArray) -> Dictionary:
+	var result := {"ok": false, "base_rev": 0, "entries": []}
+	if payload.size() < 6:
+		return result
+	var buf := StreamPeerBuffer.new()
+	buf.data_array = payload
+	var base_rev := int(buf.get_u32())
+	var count := int(buf.get_u16())
+	if count > MAX_WORLD_ENTRIES_PER_MSG:
+		return result
+	if buf.get_available_bytes() != count * 4:
+		return result
+	var entries: Array = []
+	for i in count:
+		entries.append({
+			"x": int(buf.get_u8()),
+			"y": int(buf.get_u8()),
+			"z": int(buf.get_u8()),
+			"block": int(buf.get_u8()),
+		})
+	result["base_rev"] = base_rev
+	result["entries"] = entries
+	result["ok"] = true
+	return result
+
+
+# ================================================================ WORLD_ACK
+# payload: u32 have_rev（客户端已经应用到哪个 revision）
+
+static func encode_world_ack(have_rev: int) -> PackedByteArray:
+	var buf := StreamPeerBuffer.new()
+	buf.put_u32(have_rev & 0xFFFFFFFF)
+	return buf.data_array
+
+
+static func decode_world_ack(payload: PackedByteArray) -> Dictionary:
+	var result := {"ok": false, "have_rev": 0}
+	if payload.size() != 4:
+		return result
+	var buf := StreamPeerBuffer.new()
+	buf.data_array = payload
+	result["have_rev"] = int(buf.get_u32())
+	result["ok"] = true
+	return result
+
+
+# ================================================================ ORDERS
+# payload: u16 count | count * (u8 action | u8 x | u8 y | u8 z | u8 id_len | id(UTF-8))
+# 全量虚影指令（挖/放/建/拆都算），数量很少，直接整包发。
+
+static func encode_orders(order_list: Array) -> PackedByteArray:
+	var count := mini(order_list.size(), MAX_ORDERS)
+	var buf := StreamPeerBuffer.new()
+	buf.put_u16(count)
+	for i in count:
+		var o: Dictionary = order_list[i]
+		buf.put_u8(int(ORDER_CODES.get(str(o.get("action", "mine")), 1)))
+		buf.put_u8(clampi(int(o.get("x", 0)), 0, 255))
+		buf.put_u8(clampi(int(o.get("y", 0)), 0, 255))
+		buf.put_u8(clampi(int(o.get("z", 0)), 0, 255))
+		var id_bytes := _truncate_utf8(str(o.get("id", "")), MAX_ORDER_ID_BYTES)
+		buf.put_u8(id_bytes.size())
+		buf.put_data(id_bytes)
+	return buf.data_array
+
+
+static func decode_orders(payload: PackedByteArray) -> Dictionary:
+	var result := {"ok": false, "orders": []}
+	if payload.size() < 2:
+		return result
+	var buf := StreamPeerBuffer.new()
+	buf.data_array = payload
+	var count := int(buf.get_u16())
+	if count > MAX_ORDERS:
+		return result
+	var orders: Array = []
+	for i in count:
+		if buf.get_available_bytes() < 5:
+			return result
+		var code := int(buf.get_u8())
+		var x := int(buf.get_u8())
+		var y := int(buf.get_u8())
+		var z := int(buf.get_u8())
+		var id_len := int(buf.get_u8())
+		if id_len > MAX_ORDER_ID_BYTES or buf.get_available_bytes() < id_len:
+			return result
+		var id := ""
+		if id_len > 0:
+			var got: Array = buf.get_data(id_len)
+			if int(got[0]) != OK:
+				return result
+			var id_bytes: PackedByteArray = got[1]
+			id = id_bytes.get_string_from_utf8()
+		orders.append({
+			"x": x,
+			"y": y,
+			"z": z,
+			"action": str(ORDER_ACTIONS.get(code, "mine")),
+			"id": id,
+		})
+	if buf.get_available_bytes() != 0:
+		return result
+	result["orders"] = orders
+	result["ok"] = true
+	return result
+
+
+# ================================================================ ORDER_TOGGLE
+# payload: u8 action | u8 x | u8 y | u8 z | u8 id_len | id(UTF-8)
+# 客户端点了某个格子上的虚影，交给主机去真正增删（主机权威）。
+
+static func encode_order_toggle(x: int, y: int, z: int, action: String, id: String) -> PackedByteArray:
+	var buf := StreamPeerBuffer.new()
+	buf.put_u8(int(ORDER_CODES.get(action, 1)))
+	buf.put_u8(clampi(x, 0, 255))
+	buf.put_u8(clampi(y, 0, 255))
+	buf.put_u8(clampi(z, 0, 255))
+	var id_bytes := _truncate_utf8(id, MAX_ORDER_ID_BYTES)
+	buf.put_u8(id_bytes.size())
+	buf.put_data(id_bytes)
+	return buf.data_array
+
+
+static func decode_order_toggle(payload: PackedByteArray) -> Dictionary:
+	var result := {"ok": false, "x": 0, "y": 0, "z": 0, "action": "mine", "id": ""}
+	if payload.size() < 5:
+		return result
+	var buf := StreamPeerBuffer.new()
+	buf.data_array = payload
+	var code := int(buf.get_u8())
+	var x := int(buf.get_u8())
+	var y := int(buf.get_u8())
+	var z := int(buf.get_u8())
+	var id_len := int(buf.get_u8())
+	if id_len > MAX_ORDER_ID_BYTES or buf.get_available_bytes() != id_len:
+		return result
+	var id := ""
+	if id_len > 0:
+		var got: Array = buf.get_data(id_len)
+		if int(got[0]) != OK:
+			return result
+		var id_bytes: PackedByteArray = got[1]
+		id = id_bytes.get_string_from_utf8()
+	result["x"] = x
+	result["y"] = y
+	result["z"] = z
+	result["action"] = str(ORDER_ACTIONS.get(code, "mine"))
+	result["id"] = id
+	result["ok"] = true
+	return result
+
+
+# ================================================================ BUILDINGS
+# payload: u16 count | count * (
+#     u8 id_len | id(UTF-8) | u8 x | u8 y | u8 z | u8 team |
+#     u16 hp_permille(0..10000) | u8 build_progress(0..255) | u8 flags )
+# flags: bit0 = 还活着，bit1 = 罢工/停机
+
+static func encode_buildings(building_list: Array) -> PackedByteArray:
+	var count := mini(building_list.size(), MAX_BUILDINGS)
+	var buf := StreamPeerBuffer.new()
+	buf.put_u16(count)
+	for i in count:
+		var b: Dictionary = building_list[i]
+		var id_bytes := _truncate_utf8(str(b.get("id", "")), MAX_ORDER_ID_BYTES)
+		buf.put_u8(id_bytes.size())
+		buf.put_data(id_bytes)
+		buf.put_u8(clampi(int(b.get("x", 0)), 0, 255))
+		buf.put_u8(clampi(int(b.get("y", 0)), 0, 255))
+		buf.put_u8(clampi(int(b.get("z", 0)), 0, 255))
+		buf.put_u8(clampi(int(b.get("team", 0)), 0, 255))
+		var hp_ratio := clampf(float(b.get("hp_ratio", 1.0)), 0.0, 1.0)
+		buf.put_u16(clampi(roundi(hp_ratio * 10000.0), 0, 10000))
+		var build_ratio := clampf(float(b.get("build_ratio", 1.0)), 0.0, 1.0)
+		buf.put_u8(clampi(roundi(build_ratio * 255.0), 0, 255))
+		var flags := 0
+		if bool(b.get("alive", true)):
+			flags |= 1
+		if bool(b.get("stalled", false)):
+			flags |= 2
+		buf.put_u8(flags)
+	return buf.data_array
+
+
+static func decode_buildings(payload: PackedByteArray) -> Dictionary:
+	var result := {"ok": false, "buildings": []}
+	if payload.size() < 2:
+		return result
+	var buf := StreamPeerBuffer.new()
+	buf.data_array = payload
+	var count := int(buf.get_u16())
+	if count > MAX_BUILDINGS:
+		return result
+	var buildings: Array = []
+	for i in count:
+		if buf.get_available_bytes() < 1:
+			return result
+		var id_len := int(buf.get_u8())
+		if id_len > MAX_ORDER_ID_BYTES or buf.get_available_bytes() < id_len + 8:
+			return result
+		var id := ""
+		if id_len > 0:
+			var got: Array = buf.get_data(id_len)
+			if int(got[0]) != OK:
+				return result
+			var id_bytes: PackedByteArray = got[1]
+			id = id_bytes.get_string_from_utf8()
+		var x := int(buf.get_u8())
+		var y := int(buf.get_u8())
+		var z := int(buf.get_u8())
+		var team := int(buf.get_u8())
+		var hp_permille := int(buf.get_u16())
+		var build_progress := int(buf.get_u8())
+		var flags := int(buf.get_u8())
+		buildings.append({
+			"id": id,
+			"x": x,
+			"y": y,
+			"z": z,
+			"team": team,
+			"hp_ratio": float(hp_permille) / 10000.0,
+			"build_ratio": float(build_progress) / 255.0,
+			"alive": (flags & 1) != 0,
+			"stalled": (flags & 2) != 0,
+		})
+	if buf.get_available_bytes() != 0:
+		return result
+	result["buildings"] = buildings
+	result["ok"] = true
 	return result
 
 

@@ -113,6 +113,61 @@ func _test_protocol_messages() -> void:
 	_expect_eq("ERROR code", error["code"], Protocol.ERR_CODE_REJECTED)
 	_expect_eq("ERROR 中文文本", error["message"], "代码太长：请精简到 64KB 以内")
 
+	# WORLD_EDIT
+	var edit_entries := [
+		{"x": 3, "y": 40, "z": 200, "block": 0},
+		{"x": 255, "y": 63, "z": 0, "block": 11},
+	]
+	var edit_payload := _roundtrip("WORLD_EDIT", Protocol.MSG_WORLD_EDIT, Protocol.encode_world_edit(41, edit_entries))
+	var edit := Protocol.decode_world_edit(edit_payload)
+	_expect_eq("WORLD_EDIT ok", edit["ok"], true)
+	_expect_eq("WORLD_EDIT base_rev", edit["base_rev"], 41)
+	_expect_eq("WORLD_EDIT 条目数", (edit["entries"] as Array).size(), 2)
+	var edit0: Dictionary = (edit["entries"] as Array)[0]
+	_expect_eq("WORLD_EDIT 坐标/方块", [edit0["x"], edit0["y"], edit0["z"], edit0["block"]], [3, 40, 200, 0])
+	_expect_eq("WORLD_EDIT 截断到单包上限", (Protocol.decode_world_edit(
+		Protocol.encode_world_edit(0, _fake_edits(Protocol.MAX_WORLD_ENTRIES_PER_MSG + 10)))["entries"] as Array).size(),
+		Protocol.MAX_WORLD_ENTRIES_PER_MSG)
+
+	# WORLD_ACK
+	var ack := Protocol.decode_world_ack(_roundtrip("WORLD_ACK", Protocol.MSG_WORLD_ACK, Protocol.encode_world_ack(9)))
+	_expect_eq("WORLD_ACK 往返", [ack["ok"], ack["have_rev"]], [true, 9])
+
+	# ORDERS
+	var order_list := [
+		{"x": 10, "y": 30, "z": 40, "action": "mine", "id": ""},
+		{"x": 12, "y": 31, "z": 42, "action": "build", "id": "factory"},
+	]
+	var orders_payload := _roundtrip("ORDERS", Protocol.MSG_ORDERS, Protocol.encode_orders(order_list))
+	var orders_msg := Protocol.decode_orders(orders_payload)
+	_expect_eq("ORDERS ok", orders_msg["ok"], true)
+	_expect_eq("ORDERS 数量", (orders_msg["orders"] as Array).size(), 2)
+	var order1: Dictionary = (orders_msg["orders"] as Array)[1]
+	_expect_eq("ORDERS 动作/建筑 id", [order1["action"], order1["id"]], ["build", "factory"])
+	_expect_eq("ORDERS 坐标", [order1["x"], order1["y"], order1["z"]], [12, 31, 42])
+
+	# ORDER_TOGGLE
+	var toggle := Protocol.decode_order_toggle(_roundtrip("ORDER_TOGGLE", Protocol.MSG_ORDER_TOGGLE,
+		Protocol.encode_order_toggle(7, 8, 9, "remove", "")))
+	_expect_eq("ORDER_TOGGLE 往返", [toggle["ok"], toggle["x"], toggle["y"], toggle["z"], toggle["action"]],
+		[true, 7, 8, 9, "remove"])
+
+	# BUILDINGS
+	var building_list := [
+		{"id": "miner", "x": 20, "y": 30, "z": 40, "team": 0, "hp_ratio": 0.5, "build_ratio": 1.0, "alive": true, "stalled": false},
+		{"id": "turret", "x": 21, "y": 30, "z": 40, "team": 1, "hp_ratio": 1.0, "build_ratio": 0.25, "alive": true, "stalled": true},
+	]
+	var buildings_payload := _roundtrip("BUILDINGS", Protocol.MSG_BUILDINGS, Protocol.encode_buildings(building_list))
+	var buildings_msg := Protocol.decode_buildings(buildings_payload)
+	_expect_eq("BUILDINGS ok", buildings_msg["ok"], true)
+	_expect_eq("BUILDINGS 数量", (buildings_msg["buildings"] as Array).size(), 2)
+	var b0: Dictionary = (buildings_msg["buildings"] as Array)[0]
+	_expect_eq("BUILDINGS 基础字段", [b0["id"], b0["x"], b0["y"], b0["z"], b0["team"]], ["miner", 20, 30, 40, 0])
+	_expect_le("BUILDINGS 血量量化", absf(float(b0["hp_ratio"]) - 0.5), 0.0002)
+	var b1: Dictionary = (buildings_msg["buildings"] as Array)[1]
+	_expect_le("BUILDINGS 进度量化", absf(float(b1["build_ratio"]) - 0.25), 0.005)
+	_expect_eq("BUILDINGS 罢工位", [b1["alive"], b1["stalled"]], [true, true])
+
 
 # ---------------------------------------------------------------- 协议：坏帧
 
@@ -410,6 +465,13 @@ func _test_net_loopback() -> void:
 
 
 # ---------------------------------------------------------------- 工具
+
+func _fake_edits(count: int) -> Array:
+	var out: Array = []
+	for i in count:
+		out.append({"x": i % 256, "y": i % 64, "z": (i * 7) % 256, "block": i % 12})
+	return out
+
 
 func _make_units() -> Array:
 	return [

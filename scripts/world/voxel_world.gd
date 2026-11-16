@@ -6,6 +6,9 @@ const TerrainGen = preload("res://scripts/world/terrain_gen.gd")
 const TextureAtlas = preload("res://scripts/world/texture_atlas.gd")
 const MatCache = preload("res://scripts/core/mat_cache.gd")
 
+## 方块真的变了才发（联机同步用；地形基准值相同不算变化）
+signal block_changed(cell: Vector3i, block_id: int)
+
 const CHUNK := 16
 const MAX_CHUNK_BUILDS_PER_FRAME := 1
 const BUILD_BUDGET_USEC := 8000
@@ -170,6 +173,22 @@ func setup(block_db: BlockDB, world_seed: int, sx: int, sz: int, sy: int) -> voi
 		_uv_bottom[def.id] = atlas.uv_rect(def.id, TextureAtlas.FACE_BOTTOM)
 		_uv_side[def.id] = atlas.uv_rect(def.id, TextureAtlas.FACE_SIDE)
 	_build_boundaries()
+
+
+## 联机客户端用：按主机的种子重建整张地图（地形是确定性生成的，同种子=同地形）。
+## 注意要在没有本地单位/建筑依赖旧地形的时候调用。
+func rebuild_with_seed(new_seed: int) -> void:
+	for child in get_children():
+		remove_child(child)
+		child.queue_free()
+	chunks.clear()
+	pending.clear()
+	edits.clear()
+	edited_chunks.clear()
+	_line_nodes = [null, null]
+	_line_dirty = [false, false]
+	setup(db, new_seed, size_x, size_z, size_y)
+	build_all()
 
 
 ## 把面角点/UV/法线摊平成 Packed 数组，并按「面 × AO 等级」预计算顶点色
@@ -366,6 +385,7 @@ func is_opaque(cell: Vector3i) -> bool:
 func set_block(cell: Vector3i, block_id: int) -> void:
 	if not in_bounds(cell):
 		return
+	var before := get_block(cell)
 	var base := terrain.base_block(cell.x, cell.y, cell.z)
 	if base == block_id:
 		edits.erase(cell)
@@ -383,6 +403,8 @@ func set_block(cell: Vector3i, block_id: int) -> void:
 	if (cell.z + 1) % CHUNK == 0:
 		_mark_dirty(c + Vector2i(0, 1))
 	mark_boundary_dirty_at(cell.x)
+	if before != block_id:
+		block_changed.emit(cell, block_id)
 
 
 func chunk_of(cell: Vector3i) -> Vector2i:
