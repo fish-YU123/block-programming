@@ -228,15 +228,24 @@ func _ready() -> void:
 	mp.replicas_root = units_root
 	mp.unit_def = unit_db.get_def("feifei")
 	mp.units_provider = func(): return _snapshot_units()
+	mp.orders_provider = func(): return orders
+	mp.buildings_provider = func(): return _snapshot_buildings()
+	mp.building_db = building_db
+	mp.buildings_root = buildings_root
+	mp.world_seed = world_seed
 	mp.status_changed.connect(_on_mp_status)
 	mp.code_from_client.connect(_on_mp_code)
 	mp.joined.connect(_on_mp_joined)
+	mp.map_seed_received.connect(_on_mp_map_seed)
+	mp.orders_synced.connect(_on_mp_orders_synced)
+	mp.order_from_client.connect(_on_mp_order_from_client)
 	mp_panel = MpPanel.new()
 	mp_panel.name = "MpPanel"
 	add_child(mp_panel)
 	mp_panel.host_requested.connect(_on_mp_host)
 	mp_panel.join_requested.connect(_on_mp_join)
 	mp_panel.disconnect_requested.connect(_on_mp_disconnect)
+	world.block_changed.connect(_on_world_block_changed)
 	orders_root = Node3D.new()
 	orders_root.name = "Orders"
 	add_child(orders_root)
@@ -824,6 +833,74 @@ func _snapshot_units() -> Array:
 	return out
 
 
+## 主机：把所有建筑的可同步状态打包给客户端
+func _snapshot_buildings() -> Array:
+	var out: Array = []
+	for entry in buildings:
+		var node = entry["node"]
+		if not is_instance_valid(node):
+			continue
+		out.append({
+			"id": str(entry["id"]),
+			"x": int(node.base_cell.x),
+			"y": int(node.base_cell.y),
+			"z": int(node.base_cell.z),
+			"team": int(entry.get("team", TEAM_BLUE)),
+			"hp_ratio": clampf(node.hp / maxf(node.max_hp, 0.001), 0.0, 1.0),
+			"build_ratio": 1.0 - clampf(node.build_left / maxf(node.build_total, 0.001), 0.0, 1.0),
+			"alive": bool(node.alive),
+			"stalled": bool(node.is_stalled()),
+		})
+	return out
+
+
+## 方块真的变了：主机记进同步日志（客户端自己改的方块不算，它本来就不跑模拟）
+func _on_world_block_changed(cell: Vector3i, block_id: int) -> void:
+	if mp != null and mp.is_host():
+		mp.notify_block_changed(cell, block_id)
+
+
+## 客户端：按主机的地图种子重建地形（地形确定性生成，同种子=同一张图）
+func _on_mp_map_seed(map_seed: int) -> void:
+	if world == null or map_seed == 0:
+		return
+	if world_seed == map_seed and world.chunks.size() > 0:
+		return
+	world_seed = map_seed
+	# 本地自己跑出来的那一套建筑先清掉，之后只显示主机同步的
+	for entry in buildings:
+		var node = entry["node"]
+		if is_instance_valid(node):
+			node.get_parent().remove_child(node)
+			node.queue_free()
+	buildings.clear()
+	world.rebuild_with_seed(map_seed)
+
+
+## 客户端：主机同步过来的虚影指令（以主机为准，整包替换）
+func _on_mp_orders_synced(order_list: Array) -> void:
+	var next: Array = []
+	for o in order_list:
+		next.append({
+			"x": int(o.get("x", 0)),
+			"y": int(o.get("y", 0)),
+			"z": int(o.get("z", 0)),
+			"action": str(o.get("action", ORDER_MINE)),
+			"id": str(o.get("id", "")),
+		})
+	orders = next
+	_refresh_order_ghosts()
+
+
+## 主机：客户端点了某个格子上的虚影，由主机统一增删后广播
+func _on_mp_order_from_client(cell: Vector3i, action: String, id: String) -> void:
+	if mp == null or not mp.is_host():
+		return
+	if not ORDER_COLOR.has(action):
+		return
+	toggle_order(cell, action, id)
+
+
 ## 代码：客户端取本地缓存，主机取本单位代码
 func _code_of(uid: int) -> String:
 	if mp != null and mp.is_client():
@@ -858,6 +935,13 @@ func _on_mp_status(text: String) -> void:
 
 func _on_mp_joined(team: int) -> void:
 	_client_codes.clear()
+	# 本地模拟出来的建筑全部清掉，之后由 MSG_BUILDINGS 同步主机那边的
+	for entry in buildings:
+		var node = entry["node"]
+		if is_instance_valid(node):
+			node.get_parent().remove_child(node)
+			node.queue_free()
+	buildings.clear()
 	# 客户端只看主机同步过来的单位，本地模拟的那些先藏起来（它们不再被更新）
 	for entry in units:
 		var local: RigidBody3D = entry["unit"]
@@ -1885,6 +1969,11 @@ func _refresh_enemy_sensors() -> void:
 
 ## 标记一个格子；已经标过同样的指令就取消它（返回 true 表示这次是"新增"）
 func toggle_order(cell: Vector3i, action: String, id: String = "") -> bool:
+	if mp != null and mp.is_client():
+		# 客户端不自己改虚影：发给主机，主机增删后整包广播回来
+		var had := order_index_at(cell, action) >= 0
+		mp.send_order_toggle(cell, action, "" if had else id)
+		return not had
 	var index := order_index_at(cell, action)
 	if index >= 0:
 		orders.remove_at(index)
