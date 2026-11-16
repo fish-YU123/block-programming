@@ -22,39 +22,69 @@ func compile(body: Array) -> Dictionary:
 		_emit_stmt(stmt)
 		if _fail != "":
 			return {"ok": false, "error": "第 %d 行：%s" % [int(stmt.get("line", 0)), _fail]}
-	_emit({"op": Op.RETURN, "line": _line_of_last()})
+	_emit_op(Op.RETURN, _line_of_last())
+	_pack_chunk(main)
+	for func_chunk in _funcs:
+		_pack_chunk(func_chunk)
 	return {"ok": true, "main": _chunks[0], "funcs": _funcs}
 
 
+## 编译期用 Array 便于回填跳转，结束时一次性转成 Packed 数组（运行时按 int 下标取值，少一层 Variant 装箱）
+func _pack_chunk(chunk: Dictionary) -> void:
+	chunk["code"] = PackedInt32Array(chunk["code"])
+	chunk["arg"] = PackedInt32Array(chunk["arg"])
+	chunk["arg2"] = PackedInt32Array(chunk["arg2"])
+	chunk["lines"] = PackedInt32Array(chunk["lines"])
+	chunk["names"] = PackedStringArray(chunk["names"])
+
+
 func _line_of_last() -> int:
-	var code: Array = _chunks[0]["code"]
-	if code.is_empty():
+	var lines: Array = _chunks[0]["lines"]
+	if lines.is_empty():
 		return 1
-	return int(code[code.size() - 1].get("line", 1))
+	return int(lines[lines.size() - 1])
 
 
 func _new_chunk(name: String, params: Array, defaults: Array) -> Dictionary:
-	return {"name": name, "params": params, "defaults": defaults, "code": [], "consts": [], "is_func": name != "<module>"}
+	return {
+		"name": name, "params": params, "defaults": defaults,
+		"code": [], "arg": [], "arg2": [], "lines": [], "names": [], "consts": [],
+		"is_func": name != "<module>",
+	}
 
 
 func _cur() -> Dictionary:
 	return _chunks[_chunks.size() - 1]
 
 
-func _emit(ins: Dictionary) -> void:
-	var code: Array = _cur()["code"]
-	ins["idx"] = code.size()
-	code.append(ins)
+## 同一个 chunk 内复用字符串（变量名 / 运算符 / 属性名），运行时只存 int 下标
+func _name_id(value: String) -> int:
+	var names: Array = _cur()["names"]
+	var n := names.size()
+	for i in n:
+		if str(names[i]) == value:
+			return i
+	names.append(value)
+	return n
+
+
+func _arg_id(value) -> int:
+	if value == null:
+		return -1
+	if value is int:
+		return value
+	return _name_id(str(value))
 
 
 func _emit_op(op: int, line: int, a = null, b = null) -> int:
-	var ins := {"op": op, "line": line}
-	if a != null:
-		ins["a"] = a
-	if b != null:
-		ins["b"] = b
-	_emit(ins)
-	return int(ins["idx"])
+	var chunk := _cur()
+	var code: Array = chunk["code"]
+	var idx := code.size()
+	code.append(op)
+	(chunk["lines"] as Array).append(line)
+	(chunk["arg"] as Array).append(_arg_id(a))
+	(chunk["arg2"] as Array).append(_arg_id(b))
+	return idx
 
 
 func _const(value, line: int) -> int:
@@ -73,12 +103,13 @@ func _same(a, b) -> bool:
 	return a == b
 
 
-func _patch(index: int, target) -> void:
-	_cur()["code"][index]["a"] = target
+func _patch(index: int, target: int) -> void:
+	var args: Array = _cur()["arg"]
+	args[index] = int(target)
 
 
 func _here() -> int:
-	return _cur()["code"].size()
+	return (_cur()["code"] as Array).size()
 
 
 # ---------------------------------------------------------------- 语句

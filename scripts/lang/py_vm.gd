@@ -58,9 +58,29 @@ var _main: Dictionary = {}
 var _frames: Array = []
 var _parts: Array = []
 var _line := 0
-var _lines_left := 1
-var _ops_left := 20000
-var _injected: Array = []
+## 传感器不再每帧复制进 globals（真实负载 ~40 个键 × 每单位每帧，是 inject 的主要成本）：
+## 直接持有 readings 字典，LOAD 时按 locals -> readings -> globals -> builtin 顺序查。
+var _readings: Dictionary = {}
+## 玩家代码给"传感器同名变量"赋值时会写 globals；这里记下被遮蔽的键，下次 inject 时清掉
+var _shadowed: Dictionary = {}
+## 名字查找加速：内置函数表、函数名 -> 下标
+var _builtin_map: Dictionary = {}
+var _func_by_name: Dictionary = {}
+## 复用的结果字典：真实主循环里每个单位每帧至少调一次 step()，不再每步 new 4 个 Dictionary
+var _result_cache: Dictionary = {}
+var _spin_out: Dictionary = {}
+var _steer_out: Dictionary = {}
+var _thrust_out: Dictionary = {}
+var _controls_out: Dictionary = {}
+var _controls_dirty := true
+var _spin_dirty := true
+var _steer_dirty := true
+var _thrust_dirty := true
+
+
+func _init() -> void:
+	for name in BUILTINS:
+		_builtin_map[str(name)] = true
 
 
 func load_source(src: String) -> void:
@@ -79,8 +99,51 @@ func load_source(src: String) -> void:
 		return
 	_main = compiled["main"]
 	_funcs = compiled["funcs"]
+	_build_func_index()
+	_normalize_chunks()
 	_frames = []
 	_frames.append(_new_frame(_main))
+
+
+## 把字节码里的字符串运算符（"+"/"<"/"not" 等）改写成整数 id。
+## 运行时按整数分支，避免每步对字符串做线性 match；写回 PackedInt32Array 因为它是值类型。
+func _normalize_chunks() -> void:
+	_normalize_chunk(_main)
+	for chunk in _funcs:
+		_normalize_chunk(chunk)
+
+
+func _normalize_chunk(chunk: Dictionary) -> void:
+	var code: PackedInt32Array = chunk["code"]
+	var args: PackedInt32Array = chunk["arg"]
+	var args2: PackedInt32Array = chunk["arg2"]
+	var names: PackedStringArray = chunk["names"]
+	for i in code.size():
+		match code[i]:
+			Op.BIN:
+				args[i] = int(Op.BIN_OPS.get(names[args[i]], 0))
+			Op.CMP:
+				args[i] = int(Op.CMP_OPS.get(names[args[i]], 0))
+			Op.UNARY:
+				args[i] = int(Op.UN_OPS.get(names[args[i]], 0))
+			Op.AUG_ATTR:
+				args2[i] = int(Op.BIN_OPS.get(names[args2[i]], 0))
+			Op.AUG_ITEM:
+				args[i] = int(Op.BIN_OPS.get(names[args[i]], 0))
+	chunk["arg"] = args
+	chunk["arg2"] = args2
+
+
+func _bin_name(op_id: int) -> String:
+	return str(Op.BIN_NAMES.get(op_id, "?"))
+
+
+func _cmp_name(op_id: int) -> String:
+	return str(Op.CMP_NAMES.get(op_id, "?"))
+
+
+func _un_name(op_id: int) -> String:
+	return str(Op.UN_NAMES.get(op_id, "?"))
 
 
 func _reset_runtime() -> void:
@@ -91,8 +154,10 @@ func _reset_runtime() -> void:
 	error = ""
 	finished = false
 	_frames = []
-	_injected = []
+	_readings = {}
+	_shadowed.clear()
 	_line = 0
+	_mark_all_dirty()
 
 
 func _new_frame(chunk: Dictionary) -> Dictionary:
@@ -124,10 +189,13 @@ func has_function(fname: String) -> bool:
 
 
 func _find_function(fname: String) -> int:
+	return int(_func_by_name.get(fname, -1))
+
+
+func _build_func_index() -> void:
+	_func_by_name.clear()
 	for i in _funcs.size():
-		if str(_funcs[i].get("name", "")) == fname:
-			return i
-	return -1
+		_func_by_name[str(_funcs[i].get("name", ""))] = i
 
 
 ## 直接调用一个无参函数（start / loop）；有参数或不存在则返回 false
@@ -150,8 +218,17 @@ func restart() -> void:
 	finished = false
 	_frames = [_new_frame(_main)]
 	globals = {"mem": state["mem"], "PI": PI, "E": 2.718281828459045}
-	_injected = []
+	_readings = {}
+	_shadowed.clear()
 	_apply_part_names()
+	_mark_all_dirty()
+
+
+func _mark_all_dirty() -> void:
+	_controls_dirty = true
+	_spin_dirty = true
+	_steer_dirty = true
+	_thrust_dirty = true
 
 
 func _apply_part_names() -> void:
@@ -161,27 +238,33 @@ func _apply_part_names() -> void:
 
 
 func inject(readings: Dictionary) -> void:
-	for key in _injected:
-		if key != "mem":
+	# O(1)：只换引用。上一帧玩家给传感器同名变量赋过值的，先清掉那段遮蔽
+	if not _shadowed.is_empty():
+		for key in _shadowed:
 			globals.erase(key)
-	_injected = []
-	for key in readings.keys():
-		var name := str(key)
-		if name == "mem":
-			continue
-		globals[name] = readings[key]
-		_injected.append(name)
+		_shadowed.clear()
+	# "mem" 是 VM 自己维护的全局量，不允许被传感器盖掉（旧实现同样跳过这个键）
+	if readings.has("mem"):
+		var filtered := readings.duplicate()
+		filtered.erase("mem")
+		_readings = filtered
+	else:
+		_readings = readings
 
 
 ## 跑一步：最多 max_lines 条语句。返回本帧结果。
+## 热点：指令分发全部内联在这里（不再每条指令一次 func 调用 + Dictionary 查表），
+## 局部变量缓存 stack / ip / 指令数组，只有换帧时才写回 frame。
 func step(max_lines: int = 1, max_ops: int = 20000) -> Dictionary:
-	logs = []
+	if not logs.is_empty():
+		logs.clear()
 	error = ""
 	var done := false
 	if finished:
 		return _result(true)
-	_lines_left = maxi(1, max_lines)
-	_ops_left = max_ops
+	# 预算计数用局部变量（成员访问在每条指令上都要付出代价）
+	var lines_left := maxi(1, max_lines)
+	var ops_left := max_ops
 	while true:
 		if _frames.is_empty():
 			done = true
@@ -189,31 +272,406 @@ func step(max_lines: int = 1, max_ops: int = 20000) -> Dictionary:
 			break
 		var frame: Dictionary = _frames[_frames.size() - 1]
 		var chunk: Dictionary = frame["chunk"]
-		var code: Array = chunk["code"]
+		var code: PackedInt32Array = chunk["code"]
+		var arg1: PackedInt32Array = chunk["arg"]
+		var arg2: PackedInt32Array = chunk["arg2"]
+		var code_lines: PackedInt32Array = chunk["lines"]
+		var names: PackedStringArray = chunk["names"]
+		var consts: Array = chunk["consts"]
+		var stack: Array = frame["stack"]
+		var locals: Dictionary = frame["locals"]
+		var is_func := bool(chunk["is_func"])
 		var ip := int(frame["ip"])
-		if ip >= code.size():
-			_frames.pop_back()
-			if not _frames.is_empty():
-				_frames[_frames.size() - 1]["stack"].append(null)
-				continue
-			done = true
-			finished = true
-			break
-		var ins: Dictionary = code[ip]
-		var op := int(ins["op"])
-		if op == Op.LINE:
-			if _lines_left <= 0:
+		var code_size := code.size()
+		var budget_stop := false
+		var frame_changed := false
+		while ip < code_size:
+			var at := ip
+			var op := code[at]
+			var cur_line := code_lines[at]
+			if op == Op.LINE:
+				if lines_left <= 0:
+					frame["ip"] = at
+					budget_stop = true
+					break
+				lines_left -= 1
+				_line = cur_line
+			ops_left -= 1
+			if ops_left <= 0:
+				_fail("RuntimeError", "代码跑得太久（死循环？）", cur_line)
+				done = true
+				finished = true
+				budget_stop = true
 				break
-			_lines_left -= 1
-			_line = int(ins.get("line", 0))
-		_ops_left -= 1
-		if _ops_left <= 0:
-			_fail("RuntimeError", "代码跑得太久（死循环？）", op, ins)
-			done = true
-			finished = true
+			ip = at + 1
+			if op == Op.LINE:
+					pass
+			elif op == Op.CONST:
+					stack.append(consts[arg1[at]])
+			elif op == Op.LOAD:
+					var load_name := names[arg1[at]]
+					if locals.has(load_name):
+						stack.append(locals[load_name])
+					elif _readings.has(load_name):
+						# 玩家代码给同名变量赋过值 -> 本次注入周期内以玩家赋值为准
+						if not _shadowed.is_empty() and _shadowed.has(load_name):
+							stack.append(globals[load_name])
+						else:
+							stack.append(_readings[load_name])
+					elif globals.has(load_name):
+						stack.append(globals[load_name])
+					elif _builtin_map.has(load_name):
+						stack.append({"__type": "builtin", "name": load_name})
+					else:
+						_fail("NameError", "名字未定义：%s" % load_name, cur_line)
+						done = true
+						finished = true
+						budget_stop = true
+						break
+			elif op == Op.STORE:
+					var store_name := names[arg1[at]]
+					var store_value = stack.pop_back()
+					if is_func:
+						locals[store_name] = store_value
+					else:
+						globals[store_name] = store_value
+						if _readings.has(store_name):
+							_shadowed[store_name] = true
+			elif op == Op.GET_ITEM:
+					var item_index = stack.pop_back()
+					var item_container = stack.pop_back()
+					var item_type := typeof(item_container)
+					if item_type == TYPE_DICTIONARY:
+						var item_dict: Dictionary = item_container
+						if not item_dict.has("__type") and item_dict.has(item_index):
+							stack.append(item_dict[item_index])
+						elif not _push_get_item(item_container, item_index, cur_line, stack):
+							done = true
+							finished = true
+							budget_stop = true
+							break
+					elif item_type == TYPE_ARRAY and typeof(item_index) == TYPE_INT:
+						var item_list: Array = item_container
+						var item_pos := int(item_index)
+						if item_pos < 0:
+							item_pos += item_list.size()
+						if item_pos >= 0 and item_pos < item_list.size():
+							stack.append(item_list[item_pos])
+						elif not _push_get_item(item_container, item_index, cur_line, stack):
+							done = true
+							finished = true
+							budget_stop = true
+							break
+					elif not _push_get_item(item_container, item_index, cur_line, stack):
+						done = true
+						finished = true
+						budget_stop = true
+						break
+			elif op == Op.BIN:
+					var bin_right = stack.pop_back()
+					var bin_left = stack.pop_back()
+					var bin_op := arg1[at]
+					var bin_lt := typeof(bin_left)
+					var bin_rt := typeof(bin_right)
+					var bin_done := false
+					if bin_lt == TYPE_INT and bin_rt == TYPE_INT:
+						if bin_op == Op.BIN_ADD:
+							stack.append(int(bin_left) + int(bin_right))
+							bin_done = true
+						elif bin_op == Op.BIN_SUB:
+							stack.append(int(bin_left) - int(bin_right))
+							bin_done = true
+						elif bin_op == Op.BIN_MUL:
+							stack.append(int(bin_left) * int(bin_right))
+							bin_done = true
+					elif (bin_lt == TYPE_INT or bin_lt == TYPE_FLOAT) and (bin_rt == TYPE_INT or bin_rt == TYPE_FLOAT):
+						if bin_op == Op.BIN_ADD:
+							stack.append(float(bin_left) + float(bin_right))
+							bin_done = true
+						elif bin_op == Op.BIN_SUB:
+							stack.append(float(bin_left) - float(bin_right))
+							bin_done = true
+						elif bin_op == Op.BIN_MUL:
+							stack.append(float(bin_left) * float(bin_right))
+							bin_done = true
+					if not bin_done:
+						var bin_result = _binop(_bin_name(bin_op), bin_left, bin_right, cur_line)
+						if error != "":
+							done = true
+							finished = true
+							budget_stop = true
+							break
+						stack.append(bin_result)
+			elif op == Op.SET_ITEM:
+					# 栈顺序（由编译器产生）：[值, 容器, 下标]
+					var si_index = stack.pop_back()
+					var si_obj = stack.pop_back()
+					var si_value = stack.pop_back()
+					var si_type := typeof(si_obj)
+					var si_ok := false
+					if si_type == TYPE_DICTIONARY:
+						var si_dict: Dictionary = si_obj
+						if not si_dict.has("__type"):
+							si_dict[si_index] = si_value
+							si_ok = true
+					elif si_type == TYPE_ARRAY and typeof(si_index) == TYPE_INT:
+						var si_list: Array = si_obj
+						var si_pos := int(si_index)
+						if si_pos < 0:
+							si_pos += si_list.size()
+						if si_pos >= 0 and si_pos < si_list.size():
+							si_list[si_pos] = si_value
+							si_ok = true
+					if not si_ok:
+						_set_item(si_obj, si_index, si_value, cur_line)
+						if error != "":
+							done = true
+							finished = true
+							budget_stop = true
+							break
+			elif op == Op.JUMP:
+					ip = arg1[at]
+			elif op == Op.JF:
+					if not _is_true(stack.pop_back()):
+						ip = arg1[at]
+			elif op == Op.FOR_NEXT:
+					if stack.is_empty():
+						_fail("RuntimeError", "内部错误：缺少迭代器", cur_line)
+						done = true
+						finished = true
+						budget_stop = true
+						break
+					var iterator: Dictionary = stack[stack.size() - 1]
+					if not _step_iter(iterator, stack):
+						stack.pop_back()
+						ip = arg1[at]
+			elif op == Op.CMP:
+					var cmp_right = stack.pop_back()
+					var cmp_left = stack.pop_back()
+					var cmp_op := arg1[at]
+					var cmp_lt := typeof(cmp_left)
+					var cmp_rt := typeof(cmp_right)
+					var cmp_done := false
+					if (cmp_lt == TYPE_INT or cmp_lt == TYPE_FLOAT) and (cmp_rt == TYPE_INT or cmp_rt == TYPE_FLOAT):
+						var cmp_a := float(cmp_left)
+						var cmp_b := float(cmp_right)
+						if cmp_op == Op.CMP_EQ:
+							stack.append(cmp_a == cmp_b)
+							cmp_done = true
+						elif cmp_op == Op.CMP_NE:
+							stack.append(cmp_a != cmp_b)
+							cmp_done = true
+						elif cmp_op == Op.CMP_LT:
+							stack.append(cmp_a < cmp_b)
+							cmp_done = true
+						elif cmp_op == Op.CMP_GT:
+							stack.append(cmp_a > cmp_b)
+							cmp_done = true
+						elif cmp_op == Op.CMP_LE:
+							stack.append(cmp_a <= cmp_b)
+							cmp_done = true
+						elif cmp_op == Op.CMP_GE:
+							stack.append(cmp_a >= cmp_b)
+							cmp_done = true
+					if not cmp_done:
+						var cmp_result = _compare(_cmp_name(cmp_op), cmp_left, cmp_right, cur_line)
+						if error != "":
+							done = true
+							finished = true
+							budget_stop = true
+							break
+						stack.append(cmp_result)
+			elif op == Op.CALL:
+					var argc := arg1[at]
+					var args: Array = []
+					if argc > 0:
+						args.resize(argc)
+						for k in argc:
+							args[argc - 1 - k] = stack.pop_back()
+					var callable = stack.pop_back()
+					frame["ip"] = ip
+					if not _call(callable, args, cur_line):
+						done = true
+						finished = true
+						budget_stop = true
+						break
+					frame_changed = true
+					break
+			elif op == Op.POP:
+					stack.pop_back()
+			elif op == Op.RETURN:
+					var return_value = stack.pop_back()
+					_frames.pop_back()
+					if _frames.is_empty():
+						finished = true
+					else:
+						_frames[_frames.size() - 1]["stack"].append(return_value)
+					frame_changed = true
+					break
+			elif op == Op.FUNC:
+					stack.append({"__type": "func", "idx": arg1[at]})
+			elif op == Op.ITER:
+					var iterable = stack.pop_back()
+					var it = _make_iter(iterable, cur_line)
+					if it == null:
+						done = true
+						finished = true
+						budget_stop = true
+						break
+					stack.append(it)
+			elif op == Op.BUILD_LIST:
+					var count := arg1[at]
+					var items: Array = []
+					if count > 0:
+						items.resize(count)
+						for k in count:
+							items[count - 1 - k] = stack.pop_back()
+					stack.append(items)
+			elif op == Op.BUILD_DICT:
+					var pairs := arg1[at]
+					var dict := {}
+					for i in pairs:
+						var pair_value = stack.pop_back()
+						var pair_key = stack.pop_back()
+						dict[pair_key] = pair_value
+					stack.append(dict)
+			elif op == Op.UNARY:
+					var un_value = stack.pop_back()
+					var un_op := arg1[at]
+					var un_type := typeof(un_value)
+					var un_done := false
+					if un_op == Op.UN_NEG:
+						if un_type == TYPE_INT:
+							stack.append(-int(un_value))
+							un_done = true
+						elif un_type == TYPE_FLOAT:
+							stack.append(-float(un_value))
+							un_done = true
+					elif un_op == Op.UN_NOT:
+						stack.append(not _is_true(un_value))
+						un_done = true
+					if not un_done:
+						var un_result = _unary(_un_name(un_op), un_value, cur_line)
+						if error != "":
+							done = true
+							finished = true
+							budget_stop = true
+							break
+						stack.append(un_result)
+			elif op == Op.LOAD_ATTR:
+					var attr_obj = stack.pop_back()
+					var attr_value = _get_attr(attr_obj, names[arg1[at]], cur_line)
+					if error != "":
+						done = true
+						finished = true
+						budget_stop = true
+						break
+					stack.append(attr_value)
+			elif op == Op.STORE_ATTR:
+					var set_obj = stack.pop_back()
+					var set_value = stack.pop_back()
+					_set_attr(set_obj, names[arg1[at]], set_value, cur_line)
+					if error != "":
+						done = true
+						finished = true
+						budget_stop = true
+						break
+			elif op == Op.DUP:
+					if stack.is_empty():
+						_fail("RuntimeError", "内部错误：栈为空", cur_line)
+						done = true
+						finished = true
+						budget_stop = true
+						break
+					stack.append(stack[stack.size() - 1])
+			elif op == Op.JT:
+					if _is_true(stack.pop_back()):
+						ip = arg1[at]
+			elif op == Op.AUG_ATTR:
+					var aug_value = stack.pop_back()
+					var aug_obj = stack.pop_back()
+					var current = _get_attr(aug_obj, names[arg1[at]], cur_line)
+					if error != "":
+						done = true
+						finished = true
+						budget_stop = true
+						break
+					var updated = _binop(_bin_name(arg2[at]), current, aug_value, cur_line)
+					if error != "":
+						done = true
+						finished = true
+						budget_stop = true
+						break
+					_set_attr(aug_obj, names[arg1[at]], updated, cur_line)
+					if error != "":
+						done = true
+						finished = true
+						budget_stop = true
+						break
+			elif op == Op.AUG_ITEM:
+					var aug_item_value = stack.pop_back()
+					var aug_index = stack.pop_back()
+					var aug_container = stack.pop_back()
+					var current_item = _get_item(aug_container, aug_index, cur_line)
+					if error != "":
+						done = true
+						finished = true
+						budget_stop = true
+						break
+					var new_item = _binop(_bin_name(arg1[at]), current_item, aug_item_value, cur_line)
+					if error != "":
+						done = true
+						finished = true
+						budget_stop = true
+						break
+					_set_item(aug_container, aug_index, new_item, cur_line)
+					if error != "":
+						done = true
+						finished = true
+						budget_stop = true
+						break
+			elif op == Op.UNPACK:
+					var unpack_count := arg1[at]
+					var seq = stack.pop_back()
+					if not (seq is Array):
+						_fail("TypeError", "只能拆解列表，得到的是 %s" % _type_name(seq), cur_line)
+						done = true
+						finished = true
+						budget_stop = true
+						break
+					var unpack_list: Array = seq
+					if unpack_list.size() != unpack_count:
+						_fail("ValueError", "需要 %d 个值，得到 %d 个" % [unpack_count, unpack_list.size()], cur_line)
+						done = true
+						finished = true
+						budget_stop = true
+						break
+					for i in unpack_count:
+						stack.append(unpack_list[i])
+			elif op == Op.HALT:
+					finished = true
+					done = true
+					budget_stop = true
+					break
+			elif op == Op.NOP:
+					pass
+			else:
+					_fail("RuntimeError", "未知指令 %s" % Op.name_of(op), cur_line)
+					done = true
+					finished = true
+					budget_stop = true
+					break
+
+		if frame_changed:
+			continue
+		if budget_stop:
 			break
-		frame["ip"] = ip + 1
-		if not _exec(op, ins, frame):
+		# 这一段字节码执行完了：返回上一层，调用者栈上补 None
+		frame["ip"] = ip
+		_frames.pop_back()
+		if not _frames.is_empty():
+			_frames[_frames.size() - 1]["stack"].append(null)
+		else:
 			done = true
 			finished = true
 			break
@@ -221,219 +679,41 @@ func step(max_lines: int = 1, max_ops: int = 20000) -> Dictionary:
 
 
 func _result(done: bool) -> Dictionary:
-	var spin := {}
-	for key in state["spin"].keys():
-		spin[str(key)] = float(state["spin"][key])
-	var steer := {}
-	for key in state["steer"].keys():
-		steer[str(key)] = float(state["steer"][key])
-	var thrust := {}
-	for key in state["thrust"].keys():
-		thrust[str(key)] = float(state["thrust"][key])
-	return {
-		"ok": error == "",
-		"error": error,
-		"logs": logs.duplicate(),
-		"controls": state["controls"].duplicate(),
-		"drive": float(state["drive"]),
-		"spin": spin,
-		"steer": steer,
-		"thrust": thrust,
-		"done": done,
-	}
+	# 复用字典：sub-dict 只在内容变化时重建（正常主循环里 spin/steer/thrust 基本不变）
+	if _spin_dirty:
+		_spin_out = {}
+		for key in state["spin"]:
+			_spin_out[str(key)] = float(state["spin"][key])
+		_spin_dirty = false
+	if _steer_dirty:
+		_steer_out = {}
+		for key in state["steer"]:
+			_steer_out[str(key)] = float(state["steer"][key])
+		_steer_dirty = false
+	if _thrust_dirty:
+		_thrust_out = {}
+		for key in state["thrust"]:
+			_thrust_out[str(key)] = float(state["thrust"][key])
+		_thrust_dirty = false
+	if _controls_dirty:
+		_controls_out = state["controls"].duplicate()
+		_controls_dirty = false
+	_result_cache["ok"] = error == ""
+	_result_cache["error"] = error
+	if logs.is_empty():
+		_result_cache["logs"] = logs
+	else:
+		_result_cache["logs"] = logs.duplicate()
+	_result_cache["controls"] = _controls_out
+	_result_cache["drive"] = float(state["drive"])
+	_result_cache["spin"] = _spin_out
+	_result_cache["steer"] = _steer_out
+	_result_cache["thrust"] = _thrust_out
+	_result_cache["done"] = done
+	return _result_cache
 
 
-# ---------------------------------------------------------------- 指令执行
-
-func _exec(op: int, ins: Dictionary, frame: Dictionary) -> bool:
-	var stack: Array = frame["stack"]
-	match op:
-		Op.CONST:
-			var consts: Array = frame["chunk"]["consts"]
-			stack.append(consts[int(ins["a"])])
-			return true
-		Op.LOAD:
-			var name := str(ins["a"])
-			var locals: Dictionary = frame["locals"]
-			if locals.has(name):
-				stack.append(locals[name])
-				return true
-			if globals.has(name):
-				stack.append(globals[name])
-				return true
-			if BUILTINS.has(name):
-				stack.append({"__type": "builtin", "name": name})
-				return true
-			if name == "buffer":
-				# 保留名字，避免玩家代码意外覆盖
-				return _fail("NameError", "名字未定义：%s" % name, op, ins)
-			return _fail("NameError", "名字未定义：%s" % name, op, ins)
-		Op.STORE:
-			var target := str(ins["a"])
-			var value = _pop(stack)
-			if bool(frame["chunk"].get("is_func", false)):
-				frame["locals"][target] = value
-			else:
-				globals[target] = value
-			return true
-		Op.LOAD_ATTR:
-			var obj = _pop(stack)
-			stack.append(_get_attr(obj, str(ins["a"]), op, ins))
-			return error == ""
-		Op.STORE_ATTR:
-			var target_obj = _pop(stack)
-			var target_value = _pop(stack)
-			_set_attr(target_obj, str(ins["a"]), target_value, op, ins)
-			return error == ""
-		Op.GET_ITEM:
-			var index = _pop(stack)
-			var container = _pop(stack)
-			stack.append(_get_item(container, index, op, ins))
-			return error == ""
-		Op.SET_ITEM:
-			# 栈顺序（由编译器产生）：[值, 容器, 下标]
-			var item_index = _pop(stack)
-			var item_obj = _pop(stack)
-			var item_value = _pop(stack)
-			_set_item(item_obj, item_index, item_value, op, ins)
-			return error == ""
-		Op.CALL:
-			var argc := int(ins["a"])
-			var args: Array = []
-			for i in argc:
-				args.append(_pop(stack))
-			args.reverse()
-			var callable = _pop(stack)
-			return _call(callable, args, op, ins)
-		Op.BIN:
-			var right = _pop(stack)
-			var left = _pop(stack)
-			stack.append(_binop(str(ins["a"]), left, right, op, ins))
-			return error == ""
-		Op.UNARY:
-			var operand = _pop(stack)
-			stack.append(_unary(str(ins["a"]), operand, op, ins))
-			return error == ""
-		Op.CMP:
-			var cmp_right = _pop(stack)
-			var cmp_left = _pop(stack)
-			stack.append(_compare(str(ins["a"]), cmp_left, cmp_right, op, ins))
-			return error == ""
-		Op.JUMP:
-			frame["ip"] = int(ins["a"])
-			return true
-		Op.JF:
-			if not _is_true(_pop(stack)):
-				frame["ip"] = int(ins["a"])
-			return true
-		Op.JT:
-			if _is_true(_pop(stack)):
-				frame["ip"] = int(ins["a"])
-			return true
-		Op.DUP:
-			if stack.is_empty():
-				return _fail("RuntimeError", "内部错误：栈为空", op, ins)
-			stack.append(stack[stack.size() - 1])
-			return true
-		Op.POP:
-			_pop(stack)
-			return true
-		Op.LINE:
-			return true
-		Op.RETURN:
-			var result = _pop(stack)
-			_frames.pop_back()
-			if _frames.is_empty():
-				finished = true
-			else:
-				_frames[_frames.size() - 1]["stack"].append(result)
-			return true
-		Op.FUNC:
-			stack.append({"__type": "func", "idx": int(ins["a"])})
-			return true
-		Op.ITER:
-			var iterable = _pop(stack)
-			var it = _make_iter(iterable, op, ins)
-			if it == null:
-				return false
-			stack.append(it)
-			return true
-		Op.FOR_NEXT:
-			if stack.is_empty():
-				return _fail("RuntimeError", "内部错误：缺少迭代器", op, ins)
-			var iterator: Dictionary = stack[stack.size() - 1]
-			var has_next := _step_iter(iterator)
-			if not has_next:
-				stack.pop_back()
-				frame["ip"] = int(ins["a"])
-			return true
-		Op.BUILD_LIST:
-			var count := int(ins["a"])
-			var items: Array = []
-			for i in count:
-				items.append(_pop(stack))
-			items.reverse()
-			stack.append(items)
-			return true
-		Op.BUILD_DICT:
-			var pairs := int(ins["a"])
-			var dict := {}
-			for i in pairs:
-				var value = _pop(stack)
-				var key = _pop(stack)
-				dict[key] = value
-			stack.append(dict)
-			return true
-		Op.AUG_ATTR:
-			var aug_value = _pop(stack)
-			var aug_obj = _pop(stack)
-			var current = _get_attr(aug_obj, str(ins["a"]), op, ins)
-			if error != "":
-				return false
-			var updated = _binop(str(ins["b"]), current, aug_value, op, ins)
-			if error != "":
-				return false
-			_set_attr(aug_obj, str(ins["a"]), updated, op, ins)
-			return error == ""
-		Op.AUG_ITEM:
-			var aug_item_value = _pop(stack)
-			var aug_index = _pop(stack)
-			var aug_container = _pop(stack)
-			var current_item = _get_item(aug_container, aug_index, op, ins)
-			if error != "":
-				return false
-			var new_item = _binop(str(ins["a"]), current_item, aug_item_value, op, ins)
-			if error != "":
-				return false
-			_set_item(aug_container, aug_index, new_item, op, ins)
-			return error == ""
-		Op.UNPACK:
-			var count := int(ins["a"])
-			var seq = _pop(stack)
-			if not (seq is Array):
-				return _fail("TypeError", "只能拆解列表，得到的是 %s" % _type_name(seq), op, ins)
-			var list: Array = seq
-			if list.size() != count:
-				return _fail("ValueError", "需要 %d 个值，得到 %d 个" % [count, list.size()], op, ins)
-			for i in count:
-				stack.append(list[i])
-			return true
-		Op.HALT:
-			finished = true
-			return false
-		Op.NOP:
-			return true
-	return _fail("RuntimeError", "未知指令 %s" % Op.name_of(op), op, ins)
-
-
-func _pop(stack: Array):
-	if stack.is_empty():
-		return null
-	return stack.pop_back()
-
-
-func _fail(kind: String, message: String, op: int, ins: Dictionary) -> bool:
-	var line := int(ins.get("line", _line))
+func _fail(kind: String, message: String, line: int) -> bool:
 	error = "第 %d 行 %s: %s" % [line, kind, message]
 	_line = line
 	return false
@@ -500,28 +780,28 @@ func _num(value) -> float:
 	return float(value)
 
 
-func _get_attr(obj, attr: String, op: int, ins: Dictionary):
+func _get_attr(obj, attr: String, line: int):
 	if obj is Dictionary:
 		var dict: Dictionary = obj
 		if str(dict.get("__type", "")) == "part":
-			return _part_get(dict, attr, op, ins)
+			return _part_get(dict, attr, line)
 		if dict.has(attr):
 			return dict[attr]
-		return _fail("AttributeError", "字典里没有 %s，请用 [\"%s\"]" % [attr, attr], op, ins)
-	return _fail("AttributeError", "%s 没有属性 %s" % [_type_name(obj), attr], op, ins)
+		return _fail("AttributeError", "字典里没有 %s，请用 [\"%s\"]" % [attr, attr], line)
+	return _fail("AttributeError", "%s 没有属性 %s" % [_type_name(obj), attr], line)
 
 
-func _set_attr(obj, attr: String, value, op: int, ins: Dictionary) -> bool:
+func _set_attr(obj, attr: String, value, line: int) -> bool:
 	if obj is Dictionary:
 		var dict: Dictionary = obj
 		if str(dict.get("__type", "")) == "part":
-			return _part_set(dict, attr, value, op, ins)
+			return _part_set(dict, attr, value, line)
 		dict[attr] = value
 		return true
-	return _fail("AttributeError", "%s 没有属性 %s" % [_type_name(obj), attr], op, ins)
+	return _fail("AttributeError", "%s 没有属性 %s" % [_type_name(obj), attr], line)
 
 
-func _part_get(part: Dictionary, attr: String, op: int, ins: Dictionary):
+func _part_get(part: Dictionary, attr: String, line: int):
 	var kind := str(part["kind"])
 	var slot := int(part["slot"])
 	var box := ""
@@ -540,15 +820,15 @@ func _part_get(part: Dictionary, attr: String, op: int, ins: Dictionary):
 		_:
 			known = false
 	if not known:
-		_fail("AttributeError", "部件没有属性 %s（可用：speed / steer / thrust）" % attr, op, ins)
+		_fail("AttributeError", "部件没有属性 %s（可用：speed / steer / thrust）" % attr, line)
 		return null
 	var store: Dictionary = state[box]
 	return float(store.get(slot, 0.0))
 
 
-func _part_set(part: Dictionary, attr: String, value, op: int, ins: Dictionary) -> bool:
+func _part_set(part: Dictionary, attr: String, value, line: int) -> bool:
 	if not _is_num(value):
-		return _fail("TypeError", "%s 需要数字，得到 %s" % [attr, _type_name(value)], op, ins)
+		return _fail("TypeError", "%s 需要数字，得到 %s" % [attr, _type_name(value)], line)
 	var kind := str(part["kind"])
 	var slot := int(part["slot"])
 	if slot < 0:
@@ -559,19 +839,35 @@ func _part_set(part: Dictionary, attr: String, value, op: int, ins: Dictionary) 
 			box = "thrust" if kind == "propeller" else "spin"
 		"steer":
 			if kind != "wheel":
-				return _fail("AttributeError", "只有轮子能设置 steer", op, ins)
+				return _fail("AttributeError", "只有轮子能设置 steer", line)
 			box = "steer"
 		"thrust":
 			if kind != "propeller":
-				return _fail("AttributeError", "只有螺旋桨能设置 thrust", op, ins)
+				return _fail("AttributeError", "只有螺旋桨能设置 thrust", line)
 			box = "thrust"
 		_:
-			return _fail("AttributeError", "部件没有属性 %s（可用：speed / steer / thrust）" % attr, op, ins)
+			return _fail("AttributeError", "部件没有属性 %s（可用：speed / steer / thrust）" % attr, line)
 	state[box][slot] = float(value)
+	match box:
+		"spin":
+			_spin_dirty = true
+		"steer":
+			_steer_dirty = true
+		_:
+			_thrust_dirty = true
 	return true
 
 
-func _get_item(container, index, op: int, ins: Dictionary):
+## GET_ITEM 慢路径：走完整语义检查，成功时把结果压栈并返回 true。
+func _push_get_item(container, index, line: int, stack: Array) -> bool:
+	var got = _get_item(container, index, line)
+	if error != "":
+		return false
+	stack.append(got)
+	return true
+
+
+func _get_item(container, index, line: int):
 	match typeof(container):
 		TYPE_ARRAY:
 			var list: Array = container
@@ -579,13 +875,13 @@ func _get_item(container, index, op: int, ins: Dictionary):
 				if index is float:
 					index = int(index)
 				else:
-					_fail("TypeError", "列表下标必须是整数", op, ins)
+					_fail("TypeError", "列表下标必须是整数", line)
 					return null
 			var i := int(index)
 			if i < 0:
 				i += list.size()
 			if i < 0 or i >= list.size():
-				_fail("IndexError", "列表下标越界：%d（长度 %d）" % [int(index), list.size()], op, ins)
+				_fail("IndexError", "列表下标越界：%d（长度 %d）" % [int(index), list.size()], line)
 				return null
 			return list[i]
 		TYPE_STRING:
@@ -594,23 +890,23 @@ func _get_item(container, index, op: int, ins: Dictionary):
 			if i2 < 0:
 				i2 += text.length()
 			if i2 < 0 or i2 >= text.length():
-				_fail("IndexError", "字符串下标越界", op, ins)
+				_fail("IndexError", "字符串下标越界", line)
 				return null
 			return text.substr(i2, 1)
 		TYPE_DICTIONARY:
 			var dict: Dictionary = container
 			if dict.has("__type"):
-				_fail("TypeError", "不能用下标访问 %s" % _type_name(container), op, ins)
+				_fail("TypeError", "不能用下标访问 %s" % _type_name(container), line)
 				return null
 			if not dict.has(index):
-				_fail("KeyError", "字典里没有键 %s" % _to_str(index), op, ins)
+				_fail("KeyError", "字典里没有键 %s" % _to_str(index), line)
 				return null
 			return dict[index]
-	_fail("TypeError", "%s 不能用下标访问" % _type_name(container), op, ins)
+	_fail("TypeError", "%s 不能用下标访问" % _type_name(container), line)
 	return null
 
 
-func _set_item(container, index, value, op: int, ins: Dictionary) -> bool:
+func _set_item(container, index, value, line: int) -> bool:
 	match typeof(container):
 		TYPE_ARRAY:
 			var list: Array = container
@@ -618,23 +914,23 @@ func _set_item(container, index, value, op: int, ins: Dictionary) -> bool:
 			if i < 0:
 				i += list.size()
 			if i < 0 or i >= list.size():
-				return _fail("IndexError", "列表下标越界", op, ins)
+				return _fail("IndexError", "列表下标越界", line)
 			list[i] = value
 			return true
 		TYPE_DICTIONARY:
 			var dict: Dictionary = container
 			if dict.has("__type"):
-				return _fail("TypeError", "不能写入 %s" % _type_name(container), op, ins)
+				return _fail("TypeError", "不能写入 %s" % _type_name(container), line)
 			dict[index] = value
 			return true
-	return _fail("TypeError", "%s 不能用下标写入" % _type_name(container), op, ins)
+	return _fail("TypeError", "%s 不能用下标写入" % _type_name(container), line)
 
 
 # ---------------------------------------------------------------- 运算
 
-func _binop(op_name: String, left, right, op: int, ins: Dictionary):
+func _binop(op_name: String, left, right, line: int):
 	if _is_num(left) and _is_num(right):
-		return _num_op(op_name, left, right, op, ins)
+		return _num_op(op_name, left, right, line)
 	match op_name:
 		"+":
 			if left is String and right is String:
@@ -646,17 +942,17 @@ func _binop(op_name: String, left, right, op: int, ins: Dictionary):
 		"*":
 			if left is String and _is_num(right):
 				if int(right) > MAX_REPEAT:
-					_fail("MemoryError", "字符串重复次数太大", op, ins)
+					_fail("MemoryError", "字符串重复次数太大", line)
 					return null
 				return str(left).repeat(maxi(0, int(right)))
 			if _is_num(left) and right is String:
 				if int(left) > MAX_REPEAT:
-					_fail("MemoryError", "字符串重复次数太大", op, ins)
+					_fail("MemoryError", "字符串重复次数太大", line)
 					return null
 				return str(right).repeat(maxi(0, int(left)))
 			if left is Array and _is_num(right):
 				if int(right) * (left as Array).size() > MAX_REPEAT:
-					_fail("MemoryError", "列表重复后太长", op, ins)
+					_fail("MemoryError", "列表重复后太长", line)
 					return null
 				var out2: Array = []
 				for i in maxi(0, int(right)):
@@ -664,7 +960,7 @@ func _binop(op_name: String, left, right, op: int, ins: Dictionary):
 				return out2
 			if _is_num(left) and right is Array:
 				if int(left) * (right as Array).size() > MAX_REPEAT:
-					_fail("MemoryError", "列表重复后太长", op, ins)
+					_fail("MemoryError", "列表重复后太长", line)
 					return null
 				var out3: Array = []
 				for i in maxi(0, int(left)):
@@ -672,14 +968,14 @@ func _binop(op_name: String, left, right, op: int, ins: Dictionary):
 				return out3
 		"%":
 			if left is String:
-				return _format_string(str(left), right, op, ins)
+				return _format_string(str(left), right, line)
 		_:
 			pass
-	_fail("TypeError", "不支持的运算：%s %s %s" % [_type_name(left), op_name, _type_name(right)], op, ins)
+	_fail("TypeError", "不支持的运算：%s %s %s" % [_type_name(left), op_name, _type_name(right)], line)
 	return null
 
 
-func _num_op(op_name: String, left, right, op: int, ins: Dictionary):
+func _num_op(op_name: String, left, right, line: int):
 	var both_int := typeof(left) == TYPE_INT and typeof(right) == TYPE_INT
 	var a := float(left)
 	var b := float(right)
@@ -692,18 +988,18 @@ func _num_op(op_name: String, left, right, op: int, ins: Dictionary):
 			return int(left) * int(right) if both_int else a * b
 		"/":
 			if b == 0.0:
-				_fail("ZeroDivisionError", "除以零", op, ins)
+				_fail("ZeroDivisionError", "除以零", line)
 				return null
 			return a / b
 		"//":
 			if b == 0.0:
-				_fail("ZeroDivisionError", "除以零", op, ins)
+				_fail("ZeroDivisionError", "除以零", line)
 				return null
 			var fl: float = floor(a / b)
 			return int(fl) if both_int else fl
 		"%":
 			if b == 0.0:
-				_fail("ZeroDivisionError", "取模的除数是零", op, ins)
+				_fail("ZeroDivisionError", "取模的除数是零", line)
 				return null
 			var value: float = a - floor(a / b) * b
 			return int(value) if both_int else value
@@ -714,11 +1010,11 @@ func _num_op(op_name: String, left, right, op: int, ins: Dictionary):
 					result *= int(left)
 				return result
 			return pow(a, b)
-	_fail("RuntimeError", "未知运算符 %s" % op_name, op, ins)
+	_fail("RuntimeError", "未知运算符 %s" % op_name, line)
 	return null
 
 
-func _unary(op_name: String, value, op: int, ins: Dictionary):
+func _unary(op_name: String, value, line: int):
 	match op_name:
 		"not":
 			return not _is_true(value)
@@ -731,11 +1027,11 @@ func _unary(op_name: String, value, op: int, ins: Dictionary):
 		"~":
 			if typeof(value) == TYPE_INT:
 				return ~int(value)
-	_fail("TypeError", "不支持的运算：%s %s" % [op_name, _type_name(value)], op, ins)
+	_fail("TypeError", "不支持的运算：%s %s" % [op_name, _type_name(value)], line)
 	return null
 
 
-func _compare(op_name: String, left, right, op: int, ins: Dictionary):
+func _compare(op_name: String, left, right, line: int):
 	if op_name == "in" or op_name == "not in":
 		var found := _contains(right, left)
 		return found if op_name == "in" else not found
@@ -775,7 +1071,7 @@ func _compare(op_name: String, left, right, op: int, ins: Dictionary):
 				return str(left) <= str(right)
 			">=":
 				return str(left) >= str(right)
-	_fail("TypeError", "不能比较 %s 和 %s" % [_type_name(left), _type_name(right)], op, ins)
+	_fail("TypeError", "不能比较 %s 和 %s" % [_type_name(left), _type_name(right)], line)
 	return null
 
 
@@ -827,21 +1123,21 @@ func _deep_equal(a, b) -> bool:
 
 # ---------------------------------------------------------------- 调用
 
-func _call(callable, args: Array, op: int, ins: Dictionary) -> bool:
+func _call(callable, args: Array, line: int) -> bool:
 	if not (callable is Dictionary):
-		return _fail("TypeError", "%s 不能被调用" % _type_name(callable), op, ins)
+		return _fail("TypeError", "%s 不能被调用" % _type_name(callable), line)
 	var kind := str((callable as Dictionary).get("__type", ""))
 	if kind == "builtin":
-		return _call_builtin(str(callable["name"]), args, op, ins)
+		return _call_builtin(str(callable["name"]), args, line)
 	if kind == "func":
 		var index := int(callable["idx"])
 		if index < 0 or index >= _funcs.size():
-			return _fail("RuntimeError", "内部错误：函数索引越界", op, ins)
+			return _fail("RuntimeError", "内部错误：函数索引越界", line)
 		var chunk: Dictionary = _funcs[index]
 		var params: Array = chunk["params"]
 		var defaults: Array = chunk["defaults"]
 		if args.size() > params.size():
-			return _fail("TypeError", "%s() 最多接受 %d 个参数，给了 %d 个" % [str(chunk["name"]), params.size(), args.size()], op, ins)
+			return _fail("TypeError", "%s() 最多接受 %d 个参数，给了 %d 个" % [str(chunk["name"]), params.size(), args.size()], line)
 		var locals := {}
 		for i in params.size():
 			if i < args.size():
@@ -849,15 +1145,15 @@ func _call(callable, args: Array, op: int, ins: Dictionary) -> bool:
 			elif i < defaults.size():
 				locals[params[i]] = defaults[i]
 			else:
-				return _fail("TypeError", "%s() 缺少参数 %s" % [str(chunk["name"]), str(params[i])], op, ins)
+				return _fail("TypeError", "%s() 缺少参数 %s" % [str(chunk["name"]), str(params[i])], line)
 		var frame := _new_frame(chunk)
 		frame["locals"] = locals
 		_frames.append(frame)
 		return true
-	return _fail("TypeError", "这个值不能被调用", op, ins)
+	return _fail("TypeError", "这个值不能被调用", line)
 
 
-func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
+func _call_builtin(name: String, args: Array, line: int) -> bool:
 	var stack: Array = _frames[_frames.size() - 1]["stack"]
 	match name:
 		"print":
@@ -869,114 +1165,142 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			return true
 		"set_drive":
 			if args.size() != 1 or not _is_num(args[0]):
-				return _fail("TypeError", "set_drive(数值)", op, ins)
+				return _fail("TypeError", "set_drive(数值)", line)
 			state["drive"] = float(args[0])
 			stack.append(null)
 			return true
 		"set_spin":
 			if args.size() != 2 or not _is_num(args[1]):
-				return _fail("TypeError", "set_spin(序号, 弧度每秒)", op, ins)
+				return _fail("TypeError", "set_spin(序号, 弧度每秒)", line)
 			state["spin"][int(args[0])] = float(args[1])
+			_spin_dirty = true
 			stack.append(null)
 			return true
 		"set_steer":
 			if args.size() != 2 or not _is_num(args[1]):
-				return _fail("TypeError", "set_steer(序号, 角度)", op, ins)
+				return _fail("TypeError", "set_steer(序号, 角度)", line)
 			state["steer"][int(args[0])] = float(args[1])
+			_steer_dirty = true
 			stack.append(null)
 			return true
 		"set_thrust":
 			if args.size() != 2 or not _is_num(args[1]):
-				return _fail("TypeError", "set_thrust(序号, 牛顿)", op, ins)
+				return _fail("TypeError", "set_thrust(序号, 牛顿)", line)
 			state["thrust"][int(args[0])] = float(args[1])
+			_thrust_dirty = true
 			stack.append(null)
 			return true
 		"set_lift":
 			if args.size() != 1 or not _is_num(args[0]):
-				return _fail("TypeError", "set_lift(0~1 的升力)", op, ins)
+				return _fail("TypeError", "set_lift(0~1 的升力)", line)
 			state["controls"]["lift"] = clampf(float(args[0]), 0.0, 1.0)
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"set_tilt":
 			if args.size() != 2 or not _is_num(args[0]) or not _is_num(args[1]):
-				return _fail("TypeError", "set_tilt(前后倾, 左右倾) 各 -1~1", op, ins)
+				return _fail("TypeError", "set_tilt(前后倾, 左右倾) 各 -1~1", line)
 			state["controls"]["pitch"] = clampf(float(args[0]), -1.0, 1.0)
+			_controls_dirty = true
 			state["controls"]["roll"] = clampf(float(args[1]), -1.0, 1.0)
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"set_rcs":
 			if args.size() != 2 or not _is_num(args[0]) or not _is_num(args[1]):
-				return _fail("TypeError", "set_rcs(转向, 前后) 各 -1~1", op, ins)
+				return _fail("TypeError", "set_rcs(转向, 前后) 各 -1~1", line)
 			state["controls"]["turn"] = clampf(float(args[0]), -1.0, 1.0)
+			_controls_dirty = true
 			state["controls"]["forward"] = clampf(float(args[1]), -1.0, 1.0)
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"drill":
 			if args.size() > 1:
-				return _fail("TypeError", "drill(开关) 只接受 0 或 1 个参数", op, ins)
+				return _fail("TypeError", "drill(开关) 只接受 0 或 1 个参数", line)
 			var on := true
 			if args.size() == 1:
 				on = _is_true(args[0])
 			state["controls"]["drill"] = on
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"laser":
 			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
-				return _fail("TypeError", "laser(x, y, z)：朝这个方块坐标打激光", op, ins)
+				return _fail("TypeError", "laser(x, y, z)：朝这个方块坐标打激光", line)
 			state["controls"]["laser"] = true
+			_controls_dirty = true
 			state["controls"]["laser_x"] = float(args[0])
+			_controls_dirty = true
 			state["controls"]["laser_y"] = float(args[1])
+			_controls_dirty = true
 			state["controls"]["laser_z"] = float(args[2])
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"laser_off":
 			if args.size() != 0:
-				return _fail("TypeError", "laser_off() 不接受参数", op, ins)
+				return _fail("TypeError", "laser_off() 不接受参数", line)
 			state["controls"]["laser"] = false
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"shoot":
 			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
-				return _fail("TypeError", "shoot(x, y, z)：朝这个方块坐标开炮", op, ins)
+				return _fail("TypeError", "shoot(x, y, z)：朝这个方块坐标开炮", line)
 			state["controls"]["shoot"] = true
+			_controls_dirty = true
 			state["controls"]["shoot_x"] = float(args[0])
+			_controls_dirty = true
 			state["controls"]["shoot_y"] = float(args[1])
+			_controls_dirty = true
 			state["controls"]["shoot_z"] = float(args[2])
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"go_to":
 			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
-				return _fail("TypeError", "go_to(x, y, z)：自动寻路飞到这个坐标", op, ins)
+				return _fail("TypeError", "go_to(x, y, z)：自动寻路飞到这个坐标", line)
 			state["controls"]["go"] = true
+			_controls_dirty = true
 			state["controls"]["go_x"] = float(args[0])
+			_controls_dirty = true
 			state["controls"]["go_y"] = float(args[1])
+			_controls_dirty = true
 			state["controls"]["go_z"] = float(args[2])
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"stop":
 			if args.size() != 0:
-				return _fail("TypeError", "stop() 不接受参数", op, ins)
+				return _fail("TypeError", "stop() 不接受参数", line)
 			state["controls"]["go"] = false
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"set_velocity":
 			if args.size() != 2 or not _is_num(args[0]) or not _is_num(args[1]):
-				return _fail("TypeError", "set_velocity(水平x速度, 水平z速度)：米/秒", op, ins)
+				return _fail("TypeError", "set_velocity(水平x速度, 水平z速度)：米/秒", line)
 			state["controls"]["vel_mode"] = true
+			_controls_dirty = true
 			state["controls"]["vx"] = float(args[0])
+			_controls_dirty = true
 			state["controls"]["vz"] = float(args[1])
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"set_altitude":
 			if args.size() != 1 or not _is_num(args[0]):
-				return _fail("TypeError", "set_altitude(y)：想稳定的世界高度", op, ins)
+				return _fail("TypeError", "set_altitude(y)：想稳定的世界高度", line)
 			state["controls"]["alt_mode"] = true
+			_controls_dirty = true
 			state["controls"]["alt_target"] = float(args[0])
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"build":
 			if args.size() != 4 or not _is_str(args[0]) or not _is_num(args[1]) or not _is_num(args[2]) or not _is_num(args[3]):
-				return _fail("TypeError", "build(id, x, y, z)：在指定格子盖一栋建筑", op, ins)
+				return _fail("TypeError", "build(id, x, y, z)：在指定格子盖一栋建筑", line)
 			var err := ""
 			if build_provider.is_valid():
 				err = str(build_provider.call(str(args[0]), Vector3i(int(args[1]), int(args[2]), int(args[3]))))
@@ -984,7 +1308,7 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			return true
 		"build_here":
 			if args.size() != 1 or not _is_str(args[0]):
-				return _fail("TypeError", "build_here(id)：在自己旁边找块平地把建筑盖起来", op, ins)
+				return _fail("TypeError", "build_here(id)：在自己旁边找块平地把建筑盖起来", line)
 			var err2 := ""
 			if build_here_provider.is_valid():
 				err2 = str(build_here_provider.call(str(args[0])))
@@ -992,7 +1316,7 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			return true
 		"transfer":
 			if args.size() != 1:
-				return _fail("TypeError", "transfer(开/关)：开启后把电输送给附近友军", op, ins)
+				return _fail("TypeError", "transfer(开/关)：开启后把电输送给附近友军", line)
 			var flag = args[0]
 			var on := false
 			if flag is bool:
@@ -1000,11 +1324,12 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			elif _is_num(flag):
 				on = float(flag) != 0.0
 			state["controls"]["transfer"] = on
+			_controls_dirty = true
 			stack.append(null)
 			return true
 		"produce":
 			if args.size() != 1 or not _is_str(args[0]):
-				return _fail("TypeError", "produce(单位id)：让附近自己的厂房改生产这种单位", op, ins)
+				return _fail("TypeError", "produce(单位id)：让附近自己的厂房改生产这种单位", line)
 			var produce_err := ""
 			if produce_provider.is_valid():
 				produce_err = str(produce_provider.call(str(args[0])))
@@ -1012,7 +1337,7 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			return true
 		"block_at":
 			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
-				return _fail("TypeError", "block_at(x, y, z)：查这个格子是什么方块（需要自家的全景雷达在线）", op, ins)
+				return _fail("TypeError", "block_at(x, y, z)：查这个格子是什么方块（需要自家的全景雷达在线）", line)
 			var block_name := ""
 			if block_at_provider.is_valid():
 				block_name = str(block_at_provider.call(int(args[0]), int(args[1]), int(args[2])))
@@ -1020,7 +1345,7 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			return true
 		"command":
 			if args.size() < 2 or not _is_num(args[0]) or not _is_str(args[1]):
-				return _fail("TypeError", "command(uid, 动作, x, y, z)：给某个队友下指令，动作是 goto / attack / hold", op, ins)
+				return _fail("TypeError", "command(uid, 动作, x, y, z)：给某个队友下指令，动作是 goto / attack / hold", line)
 			var cx := 0.0
 			var cy := 0.0
 			var cz := 0.0
@@ -1035,17 +1360,17 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			return true
 		"team_set":
 			if args.size() != 2 or not _is_str(args[0]):
-				return _fail("TypeError", "team_set(名字, 值)：往全队共享的黑板写一个值（值只能是数字/文字/真假）", op, ins)
+				return _fail("TypeError", "team_set(名字, 值)：往全队共享的黑板写一个值（值只能是数字/文字/真假）", line)
 			var tv = args[1]
 			if not (tv is float or tv is int or tv is String or tv is bool):
-				return _fail("TypeError", "team_set(名字, 值)：值只能是数字、文字或真/假", op, ins)
+				return _fail("TypeError", "team_set(名字, 值)：值只能是数字、文字或真/假", line)
 			if team_set_provider.is_valid():
 				team_set_provider.call(str(args[0]), tv)
 			stack.append(null)
 			return true
 		"team_get":
 			if args.size() < 1 or not _is_str(args[0]):
-				return _fail("TypeError", "team_get(名字, 默认值)：读全队共享黑板上的值", op, ins)
+				return _fail("TypeError", "team_get(名字, 默认值)：读全队共享黑板上的值", line)
 			var fallback = args[1] if args.size() > 1 else 0.0
 			var got = fallback
 			if team_get_provider.is_valid():
@@ -1054,7 +1379,7 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			return true
 		"mark":
 			if args.size() < 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
-				return _fail("TypeError", "mark(x, y, z, 标签)：给全队标一个点，别人在 marks 里能看到", op, ins)
+				return _fail("TypeError", "mark(x, y, z, 标签)：给全队标一个点，别人在 marks 里能看到", line)
 			var tag := ""
 			if args.size() > 3 and args[3] is String:
 				tag = str(args[3])
@@ -1064,7 +1389,7 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			return true
 		"place":
 			if args.size() != 4 or not _is_str(args[0]) or not _is_num(args[1]) or not _is_num(args[2]) or not _is_num(args[3]):
-				return _fail("TypeError", "place(方块名, x, y, z)：在指定格子放一块方块", op, ins)
+				return _fail("TypeError", "place(方块名, x, y, z)：在指定格子放一块方块", line)
 			var place_err := ""
 			if place_provider.is_valid():
 				place_err = str(place_provider.call(str(args[0]), Vector3i(int(args[1]), int(args[2]), int(args[3]))))
@@ -1072,7 +1397,7 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			return true
 		"find_path":
 			if args.size() != 3 or not _is_num(args[0]) or not _is_num(args[1]) or not _is_num(args[2]):
-				return _fail("TypeError", "find_path(x, y, z)：算出到这个世界坐标的航路", op, ins)
+				return _fail("TypeError", "find_path(x, y, z)：算出到这个世界坐标的航路", line)
 			var waypoints: Array = []
 			if path_provider.is_valid():
 				var pts: Array = path_provider.call(Vector3(float(args[0]), float(args[1]), float(args[2])))
@@ -1082,7 +1407,7 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			return true
 		"get_link":
 			if args.size() != 1 or not _is_num(args[0]):
-				return _fail("TypeError", "get_link(序号) 从 1 开始", op, ins)
+				return _fail("TypeError", "get_link(序号) 从 1 开始", line)
 			var index := int(args[0]) - 1
 			if index < 0 or index >= _parts.size():
 				stack.append(null)
@@ -1100,25 +1425,25 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 				stop = int(args[1])
 				if args.size() >= 3:
 					if not _is_num(args[2]):
-						return _fail("TypeError", "range 的步长必须是整数", op, ins)
+						return _fail("TypeError", "range 的步长必须是整数", line)
 					stepn = int(args[2])
 			else:
-				return _fail("TypeError", "range(终点) 或 range(起点, 终点[, 步长])", op, ins)
+				return _fail("TypeError", "range(终点) 或 range(起点, 终点[, 步长])", line)
 			if stepn == 0:
-				return _fail("ValueError", "range 的步长不能是 0", op, ins)
+				return _fail("ValueError", "range 的步长不能是 0", line)
 			stack.append({"__type": "range", "start": start, "stop": stop, "step": stepn})
 			return true
 		"len":
 			if args.size() != 1:
-				return _fail("TypeError", "len(值)", op, ins)
+				return _fail("TypeError", "len(值)", line)
 			var value = args[0]
 			if _is_num(value) or value == null or value is bool:
-				return _fail("TypeError", "%s 没有长度" % _type_name(value), op, ins)
+				return _fail("TypeError", "%s 没有长度" % _type_name(value), line)
 			stack.append(size_of(value))
 			return true
 		"abs":
 			if args.size() != 1 or not _is_num(args[0]):
-				return _fail("TypeError", "abs(数值)", op, ins)
+				return _fail("TypeError", "abs(数值)", line)
 			stack.append(abs(int(args[0])) if typeof(args[0]) == TYPE_INT else absf(float(args[0])))
 			return true
 		"min", "max":
@@ -1128,7 +1453,7 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			else:
 				values = args
 			if values.is_empty():
-				return _fail("ValueError", "%s() 需要至少一个值" % name, op, ins)
+				return _fail("ValueError", "%s() 需要至少一个值" % name, line)
 			var best = values[0]
 			for i in range(1, values.size()):
 				var candidate = values[i]
@@ -1138,14 +1463,14 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 				elif best is String and candidate is String:
 					better = str(candidate) < str(best) if name == "min" else str(candidate) > str(best)
 				else:
-					return _fail("TypeError", "%s() 的参数类型不一致" % name, op, ins)
+					return _fail("TypeError", "%s() 的参数类型不一致" % name, line)
 				if better:
 					best = candidate
 			stack.append(best)
 			return true
 		"int":
 			if args.size() != 1:
-				return _fail("TypeError", "int(值)", op, ins)
+				return _fail("TypeError", "int(值)", line)
 			var v = args[0]
 			if v is bool:
 				stack.append(1 if v else 0)
@@ -1161,10 +1486,10 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 				if text.is_valid_float():
 					stack.append(int(float(text)))
 					return true
-			return _fail("ValueError", "不能把 %s 转成整数" % _to_str(v), op, ins)
+			return _fail("ValueError", "不能把 %s 转成整数" % _to_str(v), line)
 		"float":
 			if args.size() != 1:
-				return _fail("TypeError", "float(值)", op, ins)
+				return _fail("TypeError", "float(值)", line)
 			var v2 = args[0]
 			if _is_num(v2):
 				stack.append(float(v2))
@@ -1172,22 +1497,22 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 			if v2 is String and str(v2).strip_edges().is_valid_float():
 				stack.append(float(str(v2).strip_edges()))
 				return true
-			return _fail("ValueError", "不能把 %s 转成小数" % _to_str(v2), op, ins)
+			return _fail("ValueError", "不能把 %s 转成小数" % _to_str(v2), line)
 		"str":
 			if args.size() != 1:
-				return _fail("TypeError", "str(值)", op, ins)
+				return _fail("TypeError", "str(值)", line)
 			stack.append(_to_str(args[0]))
 			return true
 		"bool":
 			if args.size() != 1:
-				return _fail("TypeError", "bool(值)", op, ins)
+				return _fail("TypeError", "bool(值)", line)
 			stack.append(_is_true(args[0]))
 			return true
 		"round":
 			if args.is_empty() or args.size() > 2:
-				return _fail("TypeError", "round(数值[, 位数])", op, ins)
+				return _fail("TypeError", "round(数值[, 位数])", line)
 			if not _is_num(args[0]):
-				return _fail("TypeError", "round() 的第一个参数必须是数字", op, ins)
+				return _fail("TypeError", "round() 的第一个参数必须是数字", line)
 			if args.size() == 1:
 				stack.append(int(roundf(float(args[0]))))
 			else:
@@ -1198,7 +1523,7 @@ func _call_builtin(name: String, args: Array, op: int, ins: Dictionary) -> bool:
 				else:
 					stack.append(roundf(float(args[0]) * factor) / factor)
 			return true
-	return _fail("NameError", "未知内置函数 %s" % name, op, ins)
+	return _fail("NameError", "未知内置函数 %s" % name, line)
 
 
 # ---------------------------------------------------------------- 字符串
@@ -1250,7 +1575,7 @@ func _repr(value) -> String:
 	return _to_str(value)
 
 
-func _format_string(template: String, value, op: int, ins: Dictionary) -> String:
+func _format_string(template: String, value, line: int) -> String:
 	if value is Array:
 		var args: Array = value
 		var out := ""
@@ -1266,13 +1591,13 @@ func _format_string(template: String, value, op: int, ins: Dictionary) -> String
 					continue
 				if spec == "d" or spec == "s" or spec == "f":
 					if index >= args.size():
-						_fail("TypeError", "% 格式化的参数不够", op, ins)
+						_fail("TypeError", "% 格式化的参数不够", line)
 						return out
 					out += _to_str(args[index])
 					index += 1
 					i += 2
 					continue
-				_fail("TypeError", "不支持的格式化符号 %%%s" % spec, op, ins)
+				_fail("TypeError", "不支持的格式化符号 %%%s" % spec, line)
 				return out
 			out += ch
 			i += 1
@@ -1282,7 +1607,7 @@ func _format_string(template: String, value, op: int, ins: Dictionary) -> String
 
 # ---------------------------------------------------------------- 迭代器
 
-func _make_iter(iterable, op: int, ins: Dictionary):
+func _make_iter(iterable, line: int):
 	match typeof(iterable):
 		TYPE_ARRAY:
 			return {"__type": "iter", "kind": "list", "seq": iterable, "i": 0}
@@ -1295,11 +1620,11 @@ func _make_iter(iterable, op: int, ins: Dictionary):
 				return {"__type": "iter", "kind": "range", "cur": int(dict["start"]), "stop": int(dict["stop"]), "step": int(dict["step"])}
 			if kind == "":
 				return {"__type": "iter", "kind": "dict", "seq": dict.keys(), "i": 0}
-	_fail("TypeError", "%s 不能用来 for 循环" % _type_name(iterable), op, ins)
+	_fail("TypeError", "%s 不能用来 for 循环" % _type_name(iterable), line)
 	return null
 
 
-func _step_iter(iterator: Dictionary) -> bool:
+func _step_iter(iterator: Dictionary, stack: Array) -> bool:
 	var kind := str(iterator.get("kind", ""))
 	if kind == "range":
 		var cur := int(iterator["cur"])
@@ -1307,7 +1632,6 @@ func _step_iter(iterator: Dictionary) -> bool:
 		var stepn := int(iterator["step"])
 		if (stepn > 0 and cur >= stop) or (stepn < 0 and cur <= stop):
 			return false
-		var stack: Array = _frames[_frames.size() - 1]["stack"]
 		stack.append(cur)
 		iterator["cur"] = cur + stepn
 		return true
@@ -1315,7 +1639,6 @@ func _step_iter(iterator: Dictionary) -> bool:
 	var i := int(iterator["i"])
 	if seq.is_empty() or i >= seq.size():
 		return false
-	var stack2: Array = _frames[_frames.size() - 1]["stack"]
-	stack2.append(seq[i])
+	stack.append(seq[i])
 	iterator["i"] = i + 1
 	return true

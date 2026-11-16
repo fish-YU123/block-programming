@@ -42,3 +42,47 @@ const NAMES := {
 
 static func name_of(op: int) -> String:
 	return str(NAMES.get(op, "?"))
+
+## 运算符的整数编码：VM 加载字节码时把字符串运算符改写成这些整数，
+## 运行时就不必对字符串做线性 match（字符串比较比整数慢很多）。
+const BIN_ADD := 1
+const BIN_SUB := 2
+const BIN_MUL := 3
+const BIN_DIV := 4
+const BIN_FLOORDIV := 5
+const BIN_MOD := 6
+const BIN_POW := 7
+
+const CMP_EQ := 1
+const CMP_NE := 2
+const CMP_LT := 3
+const CMP_GT := 4
+const CMP_LE := 5
+const CMP_GE := 6
+const CMP_IN := 7
+const CMP_NOT_IN := 8
+
+const UN_NOT := 1
+const UN_NEG := 2
+const UN_POS := 3
+const UN_INVERT := 4
+
+const BIN_OPS := {
+	"+": BIN_ADD, "-": BIN_SUB, "*": BIN_MUL, "/": BIN_DIV,
+	"//": BIN_FLOORDIV, "%": BIN_MOD, "**": BIN_POW,
+}
+const BIN_NAMES := {
+	BIN_ADD: "+", BIN_SUB: "-", BIN_MUL: "*", BIN_DIV: "/",
+	BIN_FLOORDIV: "//", BIN_MOD: "%", BIN_POW: "**",
+}
+const CMP_OPS := {
+	"==": CMP_EQ, "!=": CMP_NE, "<": CMP_LT, ">": CMP_GT,
+	"<=": CMP_LE, ">=": CMP_GE, "in": CMP_IN, "not in": CMP_NOT_IN,
+}
+const CMP_NAMES := {
+	CMP_EQ: "==", CMP_NE: "!=", CMP_LT: "<", CMP_GT: ">",
+	CMP_LE: "<=", CMP_GE: ">=", CMP_IN: "in", CMP_NOT_IN: "not in",
+}
+const UN_OPS := {"not": UN_NOT, "-": UN_NEG, "+": UN_POS, "~": UN_INVERT}
+const UN_NAMES := {UN_NOT: "not", UN_NEG: "-", UN_POS: "+", UN_INVERT: "~"}
+
