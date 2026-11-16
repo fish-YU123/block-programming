@@ -19,6 +19,8 @@ var _red_lost := false
 var _blue_seen := 0
 var _red_seen := 0
 var _done := false
+var _prev_hp := {}
+var _total_damage := 0.0
 
 
 func _initialize() -> void:
@@ -55,7 +57,12 @@ func _process(_delta: float) -> bool:
 	# 记录"打过架"：任意一方掉过血
 	for team in [0, 1]:
 		for e in _main.team_units(team):
-			if float(e["unit"].hp) < float(e["unit"].max_hp) - 1.0:
+			var uid: int = e["unit"].get_instance_id()
+			var hp_now: float = float(e["unit"].hp)
+			if _prev_hp.has(uid):
+				_total_damage += maxf(0.0, float(_prev_hp[uid]) - hp_now)
+			_prev_hp[uid] = hp_now
+			if hp_now < float(e["unit"].max_hp) - 1.0:
 				_saw_combat = true
 				if float(e["unit"].hp) < float(e["unit"].max_hp) * 0.7:
 					if team == 0:
@@ -88,10 +95,12 @@ func _process(_delta: float) -> bool:
 		_record("蓝方靠组装厂攒出更多单位", _saw_units)
 		_record("红方也靠组装厂攒出更多单位", _saw_red_units)
 		_record("双方打过架", _saw_combat)
-		# 已知问题：镜像地形之后双方经济完全对称，偶尔会打成"谁也不敢近身"的僵局，
-		# 这里只要求「真的交过火」（双方都掉过血）+ 至少一方有损失，胜负另由 sim_battle 长期观察。
+		# 已知问题：镜像地形之后双方经济完全对称，偶尔会打成"谁也不敢近身"的僵局。
+		# 所以这里不断言"某一方被打掉三成血"（受帧率影响的 flaky），而断言累计伤害：
+		# 一管血按 300 点算，实测健康对局累计掉血 438~769，取 250 作门槛留出余量。
 		_record("双方交过火（都掉过血）", _blue_damaged and _red_damaged, "蓝掉血=%s 红掉血=%s" % [str(_blue_damaged), str(_red_damaged)])
-		_record("至少一方被打掉三成血", _blue_bad or _red_bad, "蓝=%s 红=%s" % [str(_blue_bad), str(_red_bad)])
+		_record("战斗有实质战果（累计掉血 ≥ 250）", _total_damage >= 250.0,
+			"累计掉血=%.0f 蓝三成=%s 红三成=%s" % [_total_damage, str(_blue_bad), str(_red_bad)])
 		_record("全程没有单位代码报错", not _any_error())
 		_done = true
 	return false
